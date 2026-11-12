@@ -19,8 +19,9 @@ get both wrists, 25 joints and 20 joint angles per hand. Nothing to install on t
 pip install metaquest-teleop
 ```
 
-You also need `adb` (Ubuntu: `sudo apt install adb`, macOS: `brew install --cask
-android-platform-tools`), and, once, on the headset: developer mode and hand tracking on.
+You also need `adb`, the tool that talks to the headset over USB (Ubuntu: `sudo apt install
+adb`, macOS: `brew install --cask android-platform-tools`), and, once, on the headset:
+developer mode and hand tracking on.
 [Get started](https://vigno0405.github.io/MetaQuestTeleop/start.html) has the details.
 
 ## Run

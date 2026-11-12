@@ -96,5 +96,6 @@ while True:
         print(frame["right"]["wrist"]["position"])
 ```
 
-Each message is `frame.to_dict()`: `seq`, `time`, `received`, `head`, and `left` and `right`
-with `wrist`, `angles` (by name), `pinch` and the 25 `joints` as (x, y, z, qx, qy, qz, qw).
+Each message holds one frame: `left` and `right` (each `null` while not tracked) with the
+`wrist` position and orientation, the `angles` by name, the `pinch`, and the 25 `joints` as
+x, y, z position and qx, qy, qz, qw orientation. It also has `received`, the time it arrived.

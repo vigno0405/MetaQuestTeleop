@@ -6,7 +6,7 @@ with the headset or with the fake one. While `metaquest-teleop` (or your script)
 
 ## Hand
 
-One hand in its own frame: the wrist stays still and only the fingers move. Use it to check
+The hand stays still in the middle of the screen and only the fingers move. Use it to check
 the fingers, for example before driving a robot hand.
 
 ![The Hand view: a right hand on its forearm, with its axes and joint angles](_static/view-hand.png)
@@ -25,7 +25,8 @@ wrist's path over the last two seconds.
 - Axes: x red, y green, z blue.
 - The dashed line is the pinch: thumb tip to index tip, in millimetres.
 - The panels show the connection and, for the selected hand, its wrist position, pinch and
-  20 joint angles.
+  joint angles: how much each joint bends (base, middle, tip) and how far the finger spreads
+  sideways. See [the data](data.md#angles).
 
 ## Controls
 

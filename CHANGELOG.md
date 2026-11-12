@@ -6,6 +6,7 @@
   a hand view and a room view, with the forearm, joint angles and pinch.
 - `metaquest-teleop --view` opens it; `QuestHands.view_url` gives its address.
 - `metaquest-teleop-fake --hands right` (or `left`) fakes a single hand.
+- Plain labels in the dashboard: joint angles as base, spread, middle and tip.
 - Documentation at https://vigno0405.github.io/MetaQuestTeleop/.
 
 ## 0.1.0 (2026-11-12)

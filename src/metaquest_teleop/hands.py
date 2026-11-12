@@ -88,7 +88,7 @@ def _quat_multiply(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 @dataclass(frozen=True, eq=False)
 class Pose:
-    """A position and an orientation, in the session's ``local-floor`` space."""
+    """A position and an orientation, in the room's coordinates (x right, y up, -z forward)."""
 
     #: (3,) position, metres.
     position: np.ndarray
@@ -136,13 +136,15 @@ class Hand:
 
     @cached_property
     def angles(self) -> np.ndarray:
-        """(5, 4) joint angles, radians: one row per finger, thumb to pinky.
+        """(5, 4) joint angles in radians: one row per finger, thumb to pinky.
 
-        Fingers: MCP flexion, MCP abduction, PIP flexion, DIP flexion. Thumb: CMC flexion,
-        CMC abduction (both of the metacarpal against the wrist), MCP flexion, IP flexion.
-        Flexion is positive towards the palm and abduction positive towards the thumb side,
-        on both hands. Each is the bend of a bone's direction against its parent joint's
-        axes, so a straight finger reads 0 and the thumb's CMC is not 0 at rest.
+        Columns: bend at the base of the finger, sideways spread at the base, bend at the
+        middle joint, bend at the joint nearest the tip. Bending towards the palm and spreading
+        towards the thumb are positive, on both hands. A straight finger reads 0; the thumb's
+        base does not, since it is measured against the wrist.
+
+        The medical names, used in :data:`ANGLE_NAMES`: thumb CMC flexion, CMC abduction, MCP
+        flexion, IP flexion; fingers MCP flexion, MCP abduction, PIP flexion, DIP flexion.
         """
         out = np.empty((5, 4))
         for col, bend in ((0, 0), (2, 1), (3, 2)):
@@ -161,7 +163,10 @@ class Hand:
 
     @cached_property
     def local_quaternions(self) -> np.ndarray:
-        """(25, 4) each joint's rotation relative to its parent joint (PARENT); the wrist's is absolute."""
+        """(25, 4) each joint's rotation relative to the joint before it, towards the wrist.
+
+        The wrist's is its rotation in the room.
+        """
         q = self.quaternions / np.linalg.norm(self.quaternions, axis=-1, keepdims=True)
         parent = q[[max(p, 0) for p in PARENT]] * np.array([-1.0, -1.0, -1.0, 1.0])
         local = _quat_multiply(parent, q)

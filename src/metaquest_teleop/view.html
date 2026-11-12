@@ -50,6 +50,7 @@
   table.angles th { color: var(--dim); font-weight: 500; text-align: left; padding: 0 4px 2px; }
   table.angles td { padding: 1px 4px; white-space: nowrap; }
   table.angles td:first-child { color: var(--dim); }
+  .caption { color: var(--dim); font-size: 12px; margin-top: 6px; }
   .bar {
     display: inline-block; width: 30px; height: 6px; margin-right: 4px; border-radius: 3px;
     background: rgba(138, 180, 248, 0.16); vertical-align: middle; overflow: hidden;
@@ -103,9 +104,10 @@
   <div class="mono" id="hand-wrist">wrist –</div>
   <div class="mono" id="hand-pinch">pinch –</div>
   <table class="angles mono">
-    <thead><tr><th></th><th>flex</th><th>abd</th><th>flex</th><th>flex</th></tr></thead>
+    <thead><tr><th></th><th>base</th><th>spread</th><th>middle</th><th>tip</th></tr></thead>
     <tbody id="angles"></tbody>
   </table>
+  <div class="caption">Bend at the base, middle and tip joints; spread sideways at the base.</div>
 </div>
 
 <div class="panel" id="hint">Drag to rotate · Shift-drag or right-drag to pan · Scroll to zoom · Double-click to reset</div>
@@ -473,12 +475,13 @@ function updatePanels() {
   if (status && status.use_adb) setLine("usb", status.usb_ok || status.page ? "ok" : "bad", status.usb);
 
   if (!status || !status.page) setLine("headset", "warn", "waiting for the page");
-  else if (status.session === "started") setLine("headset", fresh() ? "ok" : "warn", `${status.mode}, ${status.fps} Hz`);
+  else if (status.session === "started") setLine("headset", fresh() ? "ok" : "warn",
+    `streaming at ${status.fps} Hz` + (status.mode === "fake" ? " (fake headset)" : ""));
   else setLine("headset", "warn", "page open: press Start in the headset");
 
   if (!everFrame) setLine("stream", "", "no frames yet");
   else if (!fresh()) setLine("stream", "warn", `no frames for ${age.toFixed(1)} s`);
-  else setLine("stream", "ok", status ? `${status.hz} frames/s · hands changed ${status.changed_hz}/s` : "receiving");
+  else setLine("stream", "ok", status ? `${status.hz} frames/s` : "receiving");
 
   const hand = frame && frame[state.side];
   const side = state.side.toUpperCase();

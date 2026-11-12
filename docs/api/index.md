@@ -1,83 +1,50 @@
 # API
 
-Everything starts with `from metaquest_teleop import QuestHands`.
+Everything you need is in `metaquest_teleop`. Start with `QuestHands`; each frame it gives you
+is a `Frame`, which holds up to two `Hand`s, whose joints are `Pose`s.
 
-## The stream
+Below, *method* is something you call with `()`, like `quest.wait()`; *property* and
+*attribute* are values you read, like `hand.pinch`.
+
+## QuestHands: the stream
 
 ```{eval-rst}
 .. autoclass:: metaquest_teleop.QuestHands
-   :members: start, stop, wait, latest, on_frame, rates, url, view_url, connected
+   :members: wait, latest, on_frame, start, stop, url, view_url, connected, rates
 ```
 
-## Frames and hands
+## Frame: one moment
 
 ```{eval-rst}
 .. autoclass:: metaquest_teleop.Frame
    :members:
+```
 
+## Hand: one hand
+
+```{eval-rst}
 .. autoclass:: metaquest_teleop.Hand
    :members:
+```
 
+## Pose: a position and an orientation
+
+```{eval-rst}
 .. autoclass:: metaquest_teleop.Pose
    :members:
 ```
 
-## Constants
-
-All but `PARENT` are importable from `metaquest_teleop`.
+## Names
 
 ```{eval-rst}
 .. autodata:: metaquest_teleop.hands.JOINTS
    :no-value:
 
-.. autodata:: metaquest_teleop.hands.PARENT
+.. autodata:: metaquest_teleop.hands.ANGLE_NAMES
    :no-value:
 
 .. autodata:: metaquest_teleop.hands.FINGERS
    :no-value:
 
-.. autodata:: metaquest_teleop.hands.ANGLE_NAMES
-   :no-value:
-
 .. autodata:: metaquest_teleop.server.DEFAULT_PORT
-```
-
-## Wire format: `metaquest_teleop.hands`
-
-```{eval-rst}
-.. autofunction:: metaquest_teleop.hands.decode
-
-.. autofunction:: metaquest_teleop.hands.encode
-
-.. autofunction:: metaquest_teleop.hands.rotations
-
-.. autodata:: metaquest_teleop.hands.FRAME_BYTES
-
-.. autodata:: metaquest_teleop.hands.MAGIC
-```
-
-## USB link: `metaquest_teleop.server`
-
-```{eval-rst}
-.. autofunction:: metaquest_teleop.server.adb_reverse
-```
-
-## Fake headset: `metaquest_teleop.fake`
-
-```{eval-rst}
-.. autofunction:: metaquest_teleop.fake.stream
-
-.. autofunction:: metaquest_teleop.fake.synthetic_hand
-
-.. autofunction:: metaquest_teleop.fake.pose_at
-
-.. autofunction:: metaquest_teleop.fake.quaternion
-```
-
-## Dashboard: `metaquest_teleop.dashboard`
-
-```{eval-rst}
-.. autofunction:: metaquest_teleop.dashboard.render
-
-.. autofunction:: metaquest_teleop.dashboard.run
 ```

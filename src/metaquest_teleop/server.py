@@ -57,24 +57,24 @@ class QuestHands:
 
     ::
 
-        with QuestHands() as quest:      # then open http://localhost:8012 in the Quest browser
+        with QuestHands() as quest:      # then press Start in the headset
             frame = quest.wait()         # the next frame from the headset
             frame.right.wrist.position   # metres
             frame.right.angles           # (5, 4) radians
 
-    The server listens on 127.0.0.1 only: the headset reaches it through ``adb reverse``, and
-    nothing else on the network can inject frames. Pass ``host="0.0.0.0"`` to change that.
+    Only this computer can connect (the headset comes in through the USB cable), so nothing
+    else on the network can send it frames.
 
     Parameters
     ----------
     port
-        Port of the page and the stream: the headset opens ``http://localhost:<port>``.
+        The port: the headset opens ``http://localhost:<port>``.
     adb
-        Keep the USB link up with ``adb reverse`` while no page is connected.
+        Set up the USB link to the headset automatically, with ``adb``.
     udp
-        ``(host, port)`` to also send every frame to, as one JSON datagram; None for no UDP.
+        ``(host, port)``: also send every frame there as JSON, over UDP. None for no UDP.
     host
-        The interface to listen on.
+        Who can connect: ``"127.0.0.1"`` is only this computer, ``"0.0.0.0"`` the network.
 
     Attributes
     ----------
@@ -181,11 +181,19 @@ class QuestHands:
             return self._latest if self.frames > seen else None
 
     def on_frame(self, callback: Callable[[Frame], None]) -> None:
-        """Call `callback(frame)` for every frame, on the receiving thread; keep it fast."""
+        """Call ``callback(frame)`` for every frame.
+
+        It runs in the background thread that receives the frames, so keep it fast.
+        """
         self._callbacks.append(callback)
 
     def rates(self) -> dict:
-        """frames/s over the last second, of which carried changed hand data, interval p95, age."""
+        """Statistics of the stream, as a dict.
+
+        ``hz``: frames in the last second. ``changed_hz``: how many of them carried new hand
+        data. ``interval_p95_ms``: time between frames, in ms, that 95% of frames beat.
+        ``age_ms``: age of the newest frame, in ms.
+        """
         now = time.perf_counter()
         with self._cond:
             arrivals = list(self._arrivals)
@@ -334,12 +342,11 @@ class QuestHands:
             state = msg.pop("session")
             self.headset.update(msg, session=state)
             if state == "started":
-                self._event(f"XR session started: {msg.get('mode')}, {msg.get('fps')} Hz, "
-                            f"{msg.get('space')}")
+                self._event(f"streaming started, {msg.get('fps')} Hz")
             elif state == "framerate":
                 self._event(f"frame rate now {msg.get('fps')} Hz")
             else:
-                self._event("XR session ended")
+                self._event("streaming stopped")
         if "stats" in msg:
             self.headset["stats"] = msg["stats"]
         if "error" in msg:

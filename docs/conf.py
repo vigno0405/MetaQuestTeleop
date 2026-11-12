@@ -28,7 +28,9 @@ html_favicon = "_static/favicon.svg"
 # Tooltips of API objects without their synopsis, which the theme joins with an em dash.
 # The page outline lists classes, functions and attributes, not their parameters and fields.
 object_description_options = [
-    ("py:.*", {"generate_synopses": None, "include_fields_in_toc": False}),
+    # No letter badges (C, M, A, P...) in front of the names: the page says what each one is.
+    ("py:.*", {"generate_synopses": None, "include_fields_in_toc": False,
+               "toc_icon_class": None, "toc_icon_text": None}),
     ("py:parameter", {"include_in_toc": False}),
 ]
 exclude_patterns = ["_build"]

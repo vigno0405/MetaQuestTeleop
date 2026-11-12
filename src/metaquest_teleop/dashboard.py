@@ -55,8 +55,8 @@ def _status(quest: QuestHands) -> Panel:
     if not quest.connected:
         headset = Text.assemble(_dot(None), "waiting for the page to connect")
     elif info.get("session") == "started":
-        headset = Text.assemble(_dot(streaming), f"XR session: {info.get('mode')}, ",
-                                (f"{info.get('fps')} Hz", "bold"), f", {info.get('space')}")
+        headset = Text.assemble(_dot(streaming), "streaming at ", (f"{info.get('fps')} Hz", "bold"),
+                                " (fake headset)" if info.get("mode") == "fake" else "")
     else:
         headset = Text.assemble(_dot(None), "page open: press Start in the headset")
     grid.add_row("headset", headset)
@@ -66,11 +66,8 @@ def _status(quest: QuestHands) -> Panel:
     elif not streaming:
         stream = Text(f"no frames for {rates['age_ms'] / 1000:.1f} s  ({quest.frames:,} received)", style="yellow")
     else:
-        p95 = rates["interval_p95_ms"]
         stream = Text.assemble((f"{rates['hz']} frames/s", "bold green"),
-                               f"   hands changed in {rates['changed_hz']}/s",
-                               f"   gap p95 {p95:.1f} ms" if p95 is not None else "",
-                               (f"   {quest.frames:,} frames", "dim"))
+                               (f"   {quest.frames:,} received", "dim"))
     grid.add_row("stream", stream)
     if quest.udp is not None:
         grid.add_row("UDP", f"every frame as JSON to {quest.udp[0]}:{quest.udp[1]}")
@@ -93,10 +90,11 @@ def _hand(side: str, hand: Hand | None) -> Panel:
     info.add_row("pinch", f"{hand.pinch * 1000:.0f} mm")
 
     angles = Table(box=None, padding=(0, 1), header_style="dim", show_edge=False,
-                   caption="thumb: CMC, MCP, IP   fingers: MCP, PIP, DIP", caption_style="dim")
+                   caption="degrees of bend; spread is sideways at the base",
+                   caption_style="dim")
     angles.add_column("")
-    for name in ("flex", "abd", "flex", "flex"):
-        angles.add_column(name, justify="right" if name == "abd" else "left")
+    for name in ("base", "spread", "middle", "tip"):
+        angles.add_column(name, justify="right" if name == "spread" else "left")
     for finger, row in zip(FINGERS, np.degrees(hand.angles)):
         angles.add_row(finger, f"{_bar(row[0])}{_deg(row[0])}", _deg(row[1], True),
                        f"{_bar(row[2])}{_deg(row[2])}", f"{_bar(row[3])}{_deg(row[3])}")
