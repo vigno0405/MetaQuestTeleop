@@ -2,6 +2,7 @@
 
     metaquest-teleop-fake                    # streams to the default port at 90 Hz until Ctrl-C
     metaquest-teleop-fake --hz 120 --seconds 10
+    metaquest-teleop-fake --hands right      # only the right hand, the left one untracked
     python -m metaquest_teleop.fake          # the same
 """
 
@@ -90,8 +91,12 @@ def pose_at(t: float, side: str) -> tuple[np.ndarray, Pose]:
     return angles, Pose(position, np.array([0.0, np.sin(yaw / 2), 0.0, np.cos(yaw / 2)]))
 
 
-async def stream(url: str, hz: float = 90.0, seconds: float | None = None) -> int:
-    """Send synthetic frames to a running server; returns how many were sent."""
+async def stream(url: str, hz: float = 90.0, seconds: float | None = None,
+                 hands: tuple[str, ...] = ("left", "right")) -> int:
+    """Send synthetic frames to a running server; returns how many were sent.
+
+    ``hands`` are the sides to send; the others are reported as not tracked.
+    """
     import aiohttp  # noqa: PLC0415
 
     async with aiohttp.ClientSession() as session, session.ws_connect(url) as ws:
@@ -101,9 +106,9 @@ async def stream(url: str, hz: float = 90.0, seconds: float | None = None) -> in
         start, seq = time.perf_counter(), 0
         while seconds is None or time.perf_counter() - start < seconds:
             t = time.perf_counter() - start
-            hands = {side: synthetic_hand(side, *pose_at(t, side)) for side in ("left", "right")}
+            tracked = {side: synthetic_hand(side, *pose_at(t, side)) for side in hands}
             head = Pose(np.array([0.0, 1.6, 0.0]), np.array([0.0, 0.0, 0.0, 1.0]))
-            await ws.send_bytes(encode(seq, t, head, hands["left"], hands["right"]))
+            await ws.send_bytes(encode(seq, t, head, tracked.get("left"), tracked.get("right")))
             seq += 1
             await asyncio.sleep(max(0.0, start + seq / hz - time.perf_counter()))
         await ws.send_str(json.dumps({"session": "ended"}))
@@ -116,11 +121,14 @@ def main() -> None:
                         help=f"port of the running metaquest-teleop (default {DEFAULT_PORT})")
     parser.add_argument("--hz", type=float, default=90.0, help="frames per second")
     parser.add_argument("--seconds", type=float, default=None, help="stop after this long")
+    parser.add_argument("--hands", choices=("both", "left", "right"), default="both",
+                        help="which hands to send (default both)")
     args = parser.parse_args()
+    hands = ("left", "right") if args.hands == "both" else (args.hands,)
     url = f"ws://localhost:{args.port}/ws"
-    print(f"fake headset streaming to {url} at {args.hz:g} Hz (Ctrl-C to stop)")
+    print(f"fake headset streaming {' and '.join(hands)} to {url} at {args.hz:g} Hz (Ctrl-C to stop)")
     try:
-        sent = asyncio.run(stream(url, args.hz, args.seconds))
+        sent = asyncio.run(stream(url, args.hz, args.seconds, hands))
         print(f"sent {sent} frames")
     except KeyboardInterrupt:
         pass

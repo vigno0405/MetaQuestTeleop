@@ -46,6 +46,7 @@ def _status(quest: QuestHands) -> Panel:
     grid.add_column(style="bold cyan", no_wrap=True)
     grid.add_column()
     grid.add_row("page", Text.assemble((quest.url, "bold"), ("   open in the Quest browser, press Start", "dim")))
+    grid.add_row("3D view", Text.assemble((quest.view_url, "bold"), ("   open in a browser on this computer", "dim")))
     if quest.use_adb:
         grid.add_row("USB", Text.assemble(_dot(quest.usb_ok or quest.connected), quest.usb))
 

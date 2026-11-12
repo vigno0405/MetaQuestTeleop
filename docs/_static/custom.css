@@ -90,6 +90,12 @@
   color: var(--md-default-fg-color--light);
 }
 
+/* Screenshots of the 3D view: rounded, with a thin edge. */
+.md-typeset img[src*="view-"] {
+  border-radius: 0.4rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+}
+
 /* The terminal dashboard drawn in text: no wrapping, its own sideways scroll on a phone. */
 .md-typeset pre.dashboard,
 .md-typeset div.dashboard pre {

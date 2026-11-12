@@ -46,7 +46,7 @@ Issues = "https://github.com/vigno0405/MetaQuestTeleop/issues"
 version = { attr = "metaquest_teleop.__version__" }
 
 [tool.setuptools.package-data]
-metaquest_teleop = ["client.html", "py.typed"]
+metaquest_teleop = ["client.html", "view.html", "py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

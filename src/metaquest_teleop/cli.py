@@ -2,6 +2,7 @@
 
     metaquest-teleop                        # then open http://localhost:8012 in the Quest browser
     metaquest-teleop --udp 127.0.0.1:9000   # also send every frame as JSON to a UDP port
+    metaquest-teleop --view                 # also open the 3D view of the hands in a browser
     metaquest-teleop-fake                   # in a second terminal: a fake headset, for testing
 """
 
@@ -10,12 +11,14 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+import webbrowser
 
 from . import DEFAULT_PORT, QuestHands, __version__
 
 
 def plain(quest: QuestHands) -> None:
     """One status line per second, for logs and terminals without the dashboard."""
+    print(f"page {quest.url}   3D view {quest.view_url}", flush=True)
     while True:
         time.sleep(1.0)
         frame, rates = quest.latest(), quest.rates()
@@ -41,6 +44,7 @@ def main() -> int:
                         help="also send every frame as JSON to this UDP address")
     parser.add_argument("--no-adb", action="store_true", help="do not set up the USB link (adb reverse) automatically")
     parser.add_argument("--plain", action="store_true", help="one status line per second instead of the dashboard")
+    parser.add_argument("--view", action="store_true", help="also open the 3D view of the hands in a browser")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args()
 
@@ -49,6 +53,8 @@ def main() -> int:
     except OSError as exc:
         print(f"Could not serve on port {args.port}: {exc}. Is another copy already running?")
         return 1
+    if args.view:
+        webbrowser.open(quest.view_url)
     try:
         if args.plain or not sys.stdout.isatty():
             plain(quest)

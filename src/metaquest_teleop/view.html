@@ -1,0 +1,598 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hands in 3D · metaquest-teleop</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1a2d; --panel: rgba(8, 18, 31, 0.86); --edge: rgba(138, 180, 248, 0.22);
+    --fg: #e6edf3; --dim: #8b98a9; --ok: #7ee2a8; --warn: #ffd166; --bad: #ff9b9b;
+    --accent: #ff7b66; --link: #8ab4f8; --sel: #2b5797;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg); overflow: hidden;
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  canvas.dragging { cursor: grabbing; }
+  .panel {
+    position: fixed; background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 12px; padding: 12px 14px;
+  }
+  #status { top: 16px; left: 16px; width: 340px; max-width: calc(100vw - 32px); }
+  #controls { top: 16px; right: 16px; display: grid; gap: 8px; justify-items: end; padding: 10px; }
+  #hand { bottom: 16px; left: 16px; width: 340px; max-width: calc(100vw - 32px); }
+  #hint { bottom: 16px; right: 16px; color: var(--dim); font-size: 12.5px; padding: 8px 12px; }
+  h1 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+  h1 span { color: var(--dim); font-weight: 500; }
+  .line { display: grid; grid-template-columns: 14px 62px 1fr; align-items: baseline; gap: 4px; }
+  .line b { font-weight: 600; color: var(--dim); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--dim); }
+  .dot.ok { background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.bad { background: var(--bad); }
+  .seg { display: inline-flex; border: 1px solid var(--edge); border-radius: 9px; overflow: hidden; }
+  button {
+    background: transparent; color: var(--fg); border: 0; padding: 6px 12px;
+    font: inherit; cursor: pointer;
+  }
+  button:hover { background: rgba(138, 180, 248, 0.14); }
+  button:disabled { color: var(--dim); cursor: default; background: transparent; }
+  .seg button + button { border-left: 1px solid var(--edge); }
+  button.on { background: var(--sel); }
+  .mono { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+  #hand .mono { margin-top: 2px; }
+  table.angles { border-collapse: collapse; margin-top: 10px; width: 100%; }
+  table.angles th { color: var(--dim); font-weight: 500; text-align: left; padding: 0 4px 2px; }
+  table.angles td { padding: 1px 4px; white-space: nowrap; }
+  table.angles td:first-child { color: var(--dim); }
+  .bar {
+    display: inline-block; width: 30px; height: 6px; margin-right: 4px; border-radius: 3px;
+    background: rgba(138, 180, 248, 0.16); vertical-align: middle; overflow: hidden;
+  }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  #empty {
+    left: 50%; top: 50%; transform: translate(-50%, -50%); width: 460px; max-width: calc(100vw - 32px);
+    text-align: center; padding: 20px 22px; display: none;
+  }
+  #empty p { color: var(--dim); margin-top: 8px; }
+  #empty code, #empty b { color: var(--fg); }
+  code { font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; font-size: 0.92em; white-space: nowrap; }
+  @media (max-width: 760px) {
+    #hint { display: none; }
+    #status, #hand { width: auto; right: 16px; font-size: 13px; }
+    #controls { top: auto; bottom: 16px; }
+    #hand { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div class="panel" id="status">
+  <h1>metaquest-teleop <span>3D view</span></h1>
+  <div class="line"><i class="dot" id="d-link"></i><b>server</b><span id="t-link">connecting…</span></div>
+  <div class="line" id="usb-line"><i class="dot" id="d-usb"></i><b>USB</b><span id="t-usb"></span></div>
+  <div class="line"><i class="dot" id="d-headset"></i><b>headset</b><span id="t-headset"></span></div>
+  <div class="line"><i class="dot" id="d-stream"></i><b>stream</b><span id="t-stream">no frames yet</span></div>
+</div>
+
+<div class="panel" id="controls">
+  <div class="seg" data-key="mode">
+    <button data-value="room" title="Both hands where they are, in the headset's space">Room</button>
+    <button data-value="hand" title="One hand in its wrist's frame: only the fingers move">Hand</button>
+  </div>
+  <div class="seg" data-key="side">
+    <button data-value="right">Right hand</button>
+    <button data-value="left">Left hand</button>
+  </div>
+  <div class="seg">
+    <button data-toggle="follow" title="Keep the selected hand in the middle">Follow</button>
+    <button data-toggle="trail" title="The wrist's path over the last two seconds">Trail</button>
+    <button data-toggle="axes" title="The axes of the space and of the wrist">Axes</button>
+  </div>
+  <div class="seg"><button id="reset" title="Back to the starting viewpoint (or double-click)">Reset view</button></div>
+</div>
+
+<div class="panel" id="hand">
+  <h1 id="hand-title">RIGHT <span>not tracked</span></h1>
+  <div class="mono" id="hand-wrist">wrist –</div>
+  <div class="mono" id="hand-pinch">pinch –</div>
+  <table class="angles mono">
+    <thead><tr><th></th><th>flex</th><th>abd</th><th>flex</th><th>flex</th></tr></thead>
+    <tbody id="angles"></tbody>
+  </table>
+</div>
+
+<div class="panel" id="hint">Drag to rotate · Shift-drag or right-drag to pan · Scroll to zoom · Double-click to reset</div>
+
+<div class="panel" id="empty">
+  <h1 id="empty-title">Waiting for hands</h1>
+  <div id="empty-body"></div>
+</div>
+
+<script>
+"use strict";
+
+// math-begin
+const PARENT = [-1, 0, 1, 2, 3, 0, 5, 6, 7, 8, 0, 10, 11, 12, 13, 0, 15, 16, 17, 18, 0, 20, 21, 22, 23];
+const FINGER_OF = [-1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4];
+const FOV = 50 * Math.PI / 180;
+
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const scale = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm = (a) => scale(a, 1 / (Math.hypot(a[0], a[1], a[2]) || 1));
+const lerp = (a, b, t) => add(a, scale(sub(b, a), t));
+
+// An (x, y, z, w) quaternion to a rotation matrix, as rows.
+function quatToMat(q) {
+  const n = Math.hypot(q[0], q[1], q[2], q[3]) || 1;
+  const x = q[0] / n, y = q[1] / n, z = q[2] / n, w = q[3] / n;
+  return [
+    [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+    [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+    [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+  ];
+}
+
+// A rotation's columns: the directions of its x, y and z axes.
+const column = (m, i) => [m[0][i], m[1][i], m[2][i]];
+
+// The 25 joints of a hand, rows of (x, y, z, qx, qy, qz, qw), in the wrist's own frame, shown
+// with the fingers up (the wrist's -z) and the back of the hand towards the viewer (its +y).
+function handFrame(joints) {
+  const r = quatToMat(joints[0].slice(3, 7));
+  const origin = joints[0].slice(0, 3);
+  return joints.map((joint) => {
+    const d = sub(joint.slice(0, 3), origin);
+    const local = [dot(column(r, 0), d), dot(column(r, 1), d), dot(column(r, 2), d)];
+    return [local[0], -local[2], local[1]];
+  });
+}
+
+// A camera orbiting `view.target` at `view.dist`, turned by `view.yaw` about +y and raised by
+// `view.pitch`; +y is up on screen. Points go to camera coordinates (right, up, depth), then
+// to pixels.
+function camera(view, width, height) {
+  const cp = Math.cos(view.pitch);
+  const eye = add(view.target, scale([cp * Math.sin(view.yaw), Math.sin(view.pitch), cp * Math.cos(view.yaw)], view.dist));
+  const forward = norm(sub(view.target, eye));
+  const right = norm(cross(forward, [0, 1, 0]));
+  const up = cross(right, forward);
+  const focal = (height / 2) / Math.tan(FOV / 2);
+  return {
+    eye, right, up, forward, focal,
+    toCam: (p) => { const d = sub(p, eye); return [dot(d, right), dot(d, up), dot(d, forward)]; },
+    toScreen: (c) => [width / 2 + (c[0] / c[2]) * focal, height / 2 - (c[1] / c[2]) * focal],
+  };
+}
+// math-end
+
+// ------------------------------------------------------------------------------- settings
+const FINGERS = ["thumb", "index", "middle", "ring", "pinky"];
+const ANGLE_NAMES = [
+  "thumb_cmc_flex", "thumb_cmc_abd", "thumb_mcp_flex", "thumb_ip_flex",
+  "index_mcp_flex", "index_mcp_abd", "index_pip_flex", "index_dip_flex",
+  "middle_mcp_flex", "middle_mcp_abd", "middle_pip_flex", "middle_dip_flex",
+  "ring_mcp_flex", "ring_mcp_abd", "ring_pip_flex", "ring_dip_flex",
+  "pinky_mcp_flex", "pinky_mcp_abd", "pinky_pip_flex", "pinky_dip_flex",
+];
+const COLORS = ["#ff7b66", "#ffd166", "#7ee2a8", "#4dbbd5", "#c3a6ff"];  // thumb to pinky
+const WRIST_COLOR = "#e6edf3";
+const AXIS_COLORS = ["#ff6b6b", "#7ee2a8", "#6fa8ff"];                   // x, y, z
+const TIPS = new Set([4, 9, 14, 19, 24]);
+const NEAR = 0.02;            // m: nearer than this to the camera is not drawn
+const STALE_MS = 500;         // a frame older than this is drawn faded
+const TRAIL_S = 2.0;
+const PINCH_CLOSED = 0.02;    // m
+
+const params = new URLSearchParams(location.search);
+const state = {
+  mode: params.get("mode") === "hand" ? "hand" : "room",
+  side: params.get("hand") === "left" ? "left" : "right",
+  follow: true, trail: true, axes: true,
+};
+// The starting viewpoints. Room: about where your eyes are, a little above and towards the
+// middle from the selected hand, so it looks as you see it. Hand: from the thumb's side.
+function home(mode, side) {
+  const s = side === "right" ? 1 : -1;
+  return mode === "room"
+    ? { yaw: -0.35 * s, pitch: 0.5, dist: 0.6, target: [0.0, 1.1, -0.4] }
+    : { yaw: -0.45 * s, pitch: 0.3, dist: 0.42, target: [0.0, 0.04, 0.0] };
+}
+let view = home(state.mode, state.side);
+
+// ------------------------------------------------------------------------------- data
+let frame = null, status = null, linkUp = false, lastFrameAt = -Infinity, everFrame = false;
+let trail = [];  // [time ms, wrist position] of the selected hand
+
+function connect() {
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/view/ws");
+  ws.onopen = () => { linkUp = true; };
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.status) status = msg.status;
+    if (msg.frame) {
+      frame = msg.frame;
+      lastFrameAt = performance.now();
+      everFrame = true;
+      const hand = frame[state.side];
+      if (hand) trail.push([lastFrameAt, hand.joints[0].slice(0, 3)]);
+    }
+  };
+  ws.onclose = () => { linkUp = false; setTimeout(connect, 1000); };
+}
+connect();
+
+const fresh = () => performance.now() - lastFrameAt < STALE_MS;
+
+// ------------------------------------------------------------------------------- drawing
+const canvas = document.getElementById("scene");
+const ctx = canvas.getContext("2d");
+let width = 0, height = 0, prims = [], labels = [];
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  width = canvas.clientWidth; height = canvas.clientHeight;
+  if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+    canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+const clampPx = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function clipNear(inside, outside) {
+  return lerp(inside, outside, (inside[2] - NEAR) / (inside[2] - outside[2]));
+}
+
+function addLine(cam, a, b, color, size, alpha = 1, dash = null) {
+  let ca = cam.toCam(a), cb = cam.toCam(b);
+  if (ca[2] < NEAR && cb[2] < NEAR) return;
+  if (ca[2] < NEAR) ca = clipNear(cb, ca);
+  else if (cb[2] < NEAR) cb = clipNear(ca, cb);
+  const depth = (ca[2] + cb[2]) / 2;
+  prims.push({ kind: "line", a: cam.toScreen(ca), b: cam.toScreen(cb), depth, color, alpha, dash,
+               px: clampPx(size * cam.focal / depth, 1, 14) });
+}
+
+function addDot(cam, p, radius, color, alpha = 1) {
+  const c = cam.toCam(p);
+  if (c[2] < NEAR) return;
+  prims.push({ kind: "dot", s: cam.toScreen(c), depth: c[2], color, alpha,
+               r: clampPx(radius * cam.focal / c[2], 1.5, 18) });
+}
+
+function addPoly(cam, points, color, alpha = 1) {
+  const cs = points.map(cam.toCam);
+  if (cs.some((c) => c[2] < NEAR)) return;
+  prims.push({ kind: "poly", pts: cs.map(cam.toScreen), depth: cs.reduce((s, c) => s + c[2], 0) / cs.length,
+               color, alpha });
+}
+
+function addLabel(cam, p, text, color, alpha = 1) {
+  const c = cam.toCam(p);
+  if (c[2] < NEAR) return;
+  labels.push({ s: cam.toScreen(c), text, color, alpha });
+}
+
+function paint() {
+  prims.sort((x, y) => y.depth - x.depth);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const p of prims) {
+    ctx.globalAlpha = p.alpha;
+    if (p.kind === "line") {
+      ctx.strokeStyle = p.color; ctx.lineWidth = p.px; ctx.setLineDash(p.dash || []);
+      ctx.beginPath(); ctx.moveTo(p.a[0], p.a[1]); ctx.lineTo(p.b[0], p.b[1]); ctx.stroke();
+    } else if (p.kind === "dot") {
+      ctx.setLineDash([]);
+      ctx.fillStyle = p.color; ctx.strokeStyle = "rgba(8, 18, 31, 0.9)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(p.s[0], p.s[1], p.r, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.moveTo(p.pts[0][0], p.pts[0][1]);
+      for (const q of p.pts.slice(1)) ctx.lineTo(q[0], q[1]);
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  ctx.setLineDash([]);
+  ctx.font = "600 12px ui-monospace, Menlo, Consolas, monospace";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "rgba(8, 18, 31, 0.9)";
+  for (const l of labels) {
+    ctx.globalAlpha = l.alpha;
+    ctx.strokeText(l.text, l.s[0] + 7, l.s[1]);
+    ctx.fillStyle = l.color;
+    ctx.fillText(l.text, l.s[0] + 7, l.s[1]);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function addGrid(cam) {
+  for (let i = -8; i <= 8; i++) {
+    const v = i * 0.25, major = i % 4 === 0;
+    const color = major ? "rgba(138, 180, 248, 0.28)" : "rgba(138, 180, 248, 0.12)";
+    addLine(cam, [v, 0, -2], [v, 0, 2], color, 0.0015);
+    addLine(cam, [-2, 0, v], [2, 0, v], color, 0.0015);
+  }
+}
+
+function addAxes(cam, origin, rotation, length, names, alpha = 1) {
+  for (let i = 0; i < 3; i++) {
+    const tip = add(origin, scale(column(rotation, i), length));
+    addLine(cam, origin, tip, AXIS_COLORS[i], length * 0.06, alpha);
+    if (names) addLabel(cam, tip, names[i], AXIS_COLORS[i], alpha);
+  }
+}
+
+function addHead(cam, head) {
+  const p = head.position, r = quatToMat(head.quaternion);
+  const near = Math.max(0, Math.min(1, (Math.hypot(...sub(p, cam.eye)) - 0.3) / 0.3));
+  if (near === 0) return;  // the camera is about where the head is
+  const at = (x, y, z) => add(p, add(add(scale(column(r, 0), x), scale(column(r, 1), y)), scale(column(r, 2), z)));
+  const corners = [at(-0.07, 0.045, -0.13), at(0.07, 0.045, -0.13), at(0.07, -0.045, -0.13), at(-0.07, -0.045, -0.13)];
+  const color = "rgba(230, 237, 243, 0.55)";
+  corners.forEach((c, i) => {
+    addLine(cam, p, c, color, 0.002, near);
+    addLine(cam, c, corners[(i + 1) % 4], color, 0.002, near);
+  });
+  addDot(cam, p, 0.01, WRIST_COLOR, 0.8 * near);
+  addLabel(cam, p, "head", "rgba(230, 237, 243, 0.7)", near);
+}
+
+// The forearm, as a translucent sleeve from the wrist towards the elbow (the wrist's +z), so the
+// skeleton reads as a hand on an arm; its palm side (the wrist's -y) is blue. `toSpace` takes a
+// point in the wrist's frame to the drawing's space.
+function addSleeve(cam, toSpace, alpha) {
+  const N = 20;
+  const rings = [[0.0, 0.03, 0.019], [0.05, 0.033, 0.022], [0.11, 0.036, 0.026]];  // z, x and y radii, m
+  const pts = rings.map(([z, rx, ry]) => Array.from({ length: N }, (_, i) => {
+    const a = (2 * Math.PI * i) / N;
+    return toSpace([rx * Math.cos(a), ry * Math.sin(a), z]);
+  }));
+  for (let r = 0; r + 1 < pts.length; r++) {
+    const fade = 1 - r / (pts.length - 1);
+    for (let i = 0; i < N; i++) {
+      const j = (i + 1) % N;
+      const palmSide = Math.sin((2 * Math.PI * (i + 0.5)) / N) < 0;
+      addPoly(cam, [pts[r][i], pts[r][j], pts[r + 1][j], pts[r + 1][i]],
+              palmSide ? `rgba(138, 180, 248, ${0.24 * fade})` : `rgba(230, 237, 243, ${0.16 * fade})`, alpha);
+    }
+  }
+  for (let i = 0; i < N; i++) addLine(cam, pts[0][i], pts[0][(i + 1) % N], "rgba(230, 237, 243, 0.55)", 0.0012, alpha);
+}
+
+// A point in a hand's wrist frame, in the room's space.
+function wristToRoom(hand) {
+  const r = quatToMat(hand.joints[0].slice(3, 7)), o = position(hand.joints[0]);
+  return (l) => add(o, add(add(scale(column(r, 0), l[0]), scale(column(r, 1), l[1])), scale(column(r, 2), l[2])));
+}
+
+function addHand(cam, pts, alpha) {
+  addPoly(cam, [0, 6, 11, 16, 21].map((i) => pts[i]), "rgba(230, 237, 243, 0.14)", alpha);
+  for (let i = 1; i < 25; i++) addLine(cam, pts[PARENT[i]], pts[i], COLORS[FINGER_OF[i]], 0.006, alpha);
+  for (const [a, b] of [[6, 11], [11, 16], [16, 21]]) addLine(cam, pts[a], pts[b], "rgba(230, 237, 243, 0.4)", 0.003, alpha);
+  for (let i = 0; i < 25; i++) {
+    const radius = i === 0 ? 0.011 : TIPS.has(i) ? 0.0075 : 0.0055;
+    addDot(cam, pts[i], radius, i === 0 ? WRIST_COLOR : COLORS[FINGER_OF[i]], alpha);
+  }
+}
+
+function addPinch(cam, pts, pinch, alpha) {
+  const closed = pinch < PINCH_CLOSED;
+  const color = closed ? "#ff7b66" : "rgba(230, 237, 243, 0.6)";
+  addLine(cam, pts[4], pts[9], color, 0.0015, alpha, [5, 5]);
+  addLabel(cam, lerp(pts[4], pts[9], 0.5), `${Math.round(pinch * 1000)} mm`, color, alpha);
+}
+
+const position = (joint) => joint.slice(0, 3);
+const palm = (hand) => lerp(position(hand.joints[0]), position(hand.joints[11]), 0.5);
+
+function draw() {
+  resize();
+  ctx.fillStyle = "#0d1a2d";
+  ctx.fillRect(0, 0, width, height);
+  prims = []; labels = [];
+  const now = performance.now();
+  const alive = fresh();
+  const hand = frame && frame[state.side];
+  trail = trail.filter(([t]) => now - t < TRAIL_S * 1000);
+
+  if (state.mode === "room") {
+    if (state.follow && hand && alive) view.target = lerp(view.target, palm(hand), 0.12);
+    const cam = camera(view, width, height);
+    addGrid(cam);
+    if (state.axes) addAxes(cam, [0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 0.25, ["x", "y", "z"]);
+    if (frame && frame.head) addHead(cam, frame.head);
+    for (const side of ["left", "right"]) {
+      const h = frame && frame[side];
+      if (!h) continue;
+      const selected = side === state.side;
+      const alpha = (alive ? 1 : 0.3) * (selected ? 1 : 0.55);
+      const pts = h.joints.map(position);
+      addSleeve(cam, wristToRoom(h), alpha);
+      addHand(cam, pts, alpha);
+      if (selected) {
+        addPinch(cam, pts, h.pinch, alpha);
+        if (state.axes) addAxes(cam, pts[0], quatToMat(h.joints[0].slice(3, 7)), 0.06, null, alpha);
+      }
+    }
+    if (state.trail && alive) {
+      for (let i = 1; i < trail.length; i++) {
+        const age = (now - trail[i][0]) / (TRAIL_S * 1000);
+        addLine(cam, trail[i - 1][1], trail[i][1], "#e6edf3", 0.0025, 0.7 * (1 - age));
+      }
+    }
+  } else if (hand) {
+    const cam = camera(view, width, height);
+    const pts = handFrame(hand.joints);
+    const alpha = alive ? 1 : 0.3;
+    if (state.axes) addAxes(cam, [0, 0, 0], [[1, 0, 0], [0, 0, -1], [0, 1, 0]], 0.06, ["x", "y", "z"], alpha);
+    addSleeve(cam, (l) => [l[0], -l[2], l[1]], alpha);
+    addHand(cam, pts, alpha);
+    addPinch(cam, pts, hand.pinch, alpha);
+  }
+  paint();
+  requestAnimationFrame(draw);
+}
+
+// ------------------------------------------------------------------------------- panels
+const $ = (id) => document.getElementById(id);
+const angleCells = FINGERS.map((finger) => {
+  const row = document.createElement("tr");
+  row.innerHTML = `<td>${finger}</td><td></td><td></td><td></td><td></td>`;
+  $("angles").appendChild(row);
+  return Array.from(row.children).slice(1);
+});
+
+function setLine(name, kind, text) {
+  $("d-" + name).className = "dot " + kind;
+  $("t-" + name).textContent = text;
+}
+
+const deg = (rad, signed) => {
+  const d = Math.round(rad * 180 / Math.PI);
+  return (signed && d > 0 ? "+" : "") + d + "°";
+};
+const signed = (v) => (v >= 0 ? "+" : "") + v.toFixed(3);
+
+function updatePanels() {
+  const age = (performance.now() - lastFrameAt) / 1000;
+  setLine("link", linkUp ? "ok" : "bad", linkUp ? "connected" : "disconnected: is metaquest-teleop running?");
+
+  $("usb-line").style.display = status && status.use_adb ? "" : "none";
+  if (status && status.use_adb) setLine("usb", status.usb_ok || status.page ? "ok" : "bad", status.usb);
+
+  if (!status || !status.page) setLine("headset", "warn", "waiting for the page");
+  else if (status.session === "started") setLine("headset", fresh() ? "ok" : "warn", `${status.mode}, ${status.fps} Hz`);
+  else setLine("headset", "warn", "page open: press Start in the headset");
+
+  if (!everFrame) setLine("stream", "", "no frames yet");
+  else if (!fresh()) setLine("stream", "warn", `no frames for ${age.toFixed(1)} s`);
+  else setLine("stream", "ok", status ? `${status.hz} frames/s · hands changed ${status.changed_hz}/s` : "receiving");
+
+  const hand = frame && frame[state.side];
+  const side = state.side.toUpperCase();
+  $("hand-title").innerHTML = hand
+    ? `${side} <span style="color: var(--ok)">● tracked</span>`
+    : `${side} <span>○ not tracked</span>`;
+  if (hand) {
+    const w = hand.wrist.position;
+    $("hand-wrist").textContent = `wrist  x ${signed(w[0])}  y ${signed(w[1])}  z ${signed(w[2])} m`;
+    $("hand-pinch").textContent = `pinch  ${Math.round(hand.pinch * 1000)} mm`;
+    angleCells.forEach((cells, f) => {
+      cells.forEach((cell, c) => {
+        const rad = hand.angles[ANGLE_NAMES[4 * f + c]];
+        if (c === 1) { cell.textContent = deg(rad, true); return; }
+        const fill = Math.max(0, Math.min(1, rad * 180 / Math.PI / 100));
+        cell.innerHTML = `<span class="bar"><i style="width:${(fill * 100).toFixed(0)}%"></i></span>${deg(rad)}`;
+      });
+    });
+  } else {
+    $("hand-wrist").textContent = "wrist  –";
+    $("hand-pinch").textContent = "pinch  –";
+    angleCells.forEach((cells) => cells.forEach((cell) => { cell.textContent = ""; }));
+  }
+
+  const empty = $("empty");
+  let title = null, body = "";
+  const page = `http://localhost:${location.port || 80}`;
+  if (!linkUp) {
+    title = "Not connected";
+    body = "<p>This page gets the hands from <code>metaquest-teleop</code> (or your script using " +
+           "<code>QuestHands</code>). Start it again; the page reconnects by itself.</p>";
+  } else if (!everFrame || age > 2) {
+    title = everFrame ? "No frames for a while" : "Waiting for hands";
+    body = `<p>With the headset: open <b>${page}</b> in the Quest browser and press Start.</p>` +
+           "<p>Without it: run <code>metaquest-teleop-fake</code> in another terminal " +
+           "(<code>--hands right</code> for the right hand only).</p>";
+  } else if (state.mode === "hand" && !hand) {
+    title = `The ${state.side} hand is not tracked`;
+    body = "<p>Show it to the headset, or pick the other hand at the top right.</p>";
+  }
+  empty.style.display = title ? "block" : "none";
+  if (title) { $("empty-title").textContent = title; $("empty-body").innerHTML = body; }
+}
+setInterval(updatePanels, 80);
+
+// ------------------------------------------------------------------------------- controls
+function syncControls() {
+  document.querySelectorAll(".seg[data-key] button").forEach((b) => {
+    b.classList.toggle("on", state[b.parentElement.dataset.key] === b.dataset.value);
+  });
+  document.querySelectorAll("button[data-toggle]").forEach((b) => {
+    b.classList.toggle("on", state[b.dataset.toggle]);
+    b.disabled = state.mode === "hand" && b.dataset.toggle !== "axes";
+  });
+  history.replaceState(null, "", `?mode=${state.mode}&hand=${state.side}`);
+}
+
+function resetView() {
+  const keep = view.target;
+  view = home(state.mode, state.side);
+  if (state.mode === "room") {
+    const hand = frame && frame[state.side];
+    view.target = hand ? palm(hand) : keep;
+    state.follow = true;
+  }
+  syncControls();
+}
+
+document.querySelectorAll(".seg[data-key] button").forEach((b) => b.addEventListener("click", () => {
+  const key = b.parentElement.dataset.key;
+  if (state[key] === b.dataset.value) return;
+  state[key] = b.dataset.value;
+  trail = [];
+  view = Object.assign(home(state.mode, state.side), state.mode === "room" ? { target: view.target } : {});
+  syncControls();
+}));
+document.querySelectorAll("button[data-toggle]").forEach((b) => b.addEventListener("click", () => {
+  state[b.dataset.toggle] = !state[b.dataset.toggle];
+  syncControls();
+}));
+$("reset").addEventListener("click", resetView);
+
+let drag = null;
+canvas.addEventListener("pointerdown", (e) => {
+  drag = { x: e.clientX, y: e.clientY, pan: e.button !== 0 || e.shiftKey };
+  canvas.setPointerCapture(e.pointerId);
+  canvas.classList.add("dragging");
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.x = e.clientX; drag.y = e.clientY;
+  if (drag.pan) {
+    const cam = camera(view, width, height), k = view.dist / cam.focal;
+    view.target = add(view.target, add(scale(cam.right, -dx * k), scale(cam.up, dy * k)));
+    if (state.mode === "room" && state.follow) { state.follow = false; syncControls(); }
+  } else {
+    view.yaw -= dx * 0.008;
+    view.pitch = Math.max(-1.45, Math.min(1.45, view.pitch + dy * 0.008));
+  }
+});
+const endDrag = () => { drag = null; canvas.classList.remove("dragging"); };
+canvas.addEventListener("pointerup", endDrag);
+canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  view.dist = Math.max(0.08, Math.min(8, view.dist * Math.exp(e.deltaY * 0.0012)));
+}, { passive: false });
+canvas.addEventListener("dblclick", resetView);
+
+syncControls();
+updatePanels();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

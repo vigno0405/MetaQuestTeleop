@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import contextlib
 import json
 import shutil
 import socket
@@ -19,9 +20,11 @@ from aiohttp import WSMsgType, web
 from .hands import Frame, decode
 
 PAGE = Path(__file__).with_name("client.html")
+VIEW = Path(__file__).with_name("view.html")
 #: The port of the page and the stream unless you choose another.
 DEFAULT_PORT = 8012
 _HANDS_OFFSET = 48
+_VIEW_HZ = 60.0
 
 
 def adb_reverse(port: int) -> tuple[bool, str]:
@@ -102,6 +105,7 @@ class QuestHands:
         self._arrivals: collections.deque[tuple[float, bool]] = collections.deque(maxlen=2048)
         self._last_hands = b""
         self._clients: set[web.WebSocketResponse] = set()
+        self._viewers: set[web.WebSocketResponse] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._runner: web.AppRunner | None = None
         self._thread: threading.Thread | None = None
@@ -153,6 +157,11 @@ class QuestHands:
     def url(self) -> str:
         """The address to open in the Quest browser."""
         return f"http://localhost:{self.port}"
+
+    @property
+    def view_url(self) -> str:
+        """The address of the 3D view of the hands, to open in a browser on this computer."""
+        return f"{self.url}/view"
 
     @property
     def connected(self) -> bool:
@@ -207,12 +216,14 @@ class QuestHands:
         app = web.Application()
         app.router.add_get("/", self._page)
         app.router.add_get("/ws", self._socket)
+        app.router.add_get("/view", self._view_page)
+        app.router.add_get("/view/ws", self._view_socket)
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
         await web.TCPSite(self._runner, self.host, self.port).start()
 
     async def _shutdown(self) -> None:
-        for ws in list(self._clients):
+        for ws in list(self._clients) + list(self._viewers):
             await ws.close()
         if self._runner is not None:
             await self._runner.cleanup()
@@ -236,6 +247,54 @@ class QuestHands:
             self.headset = {}
             self._event("headset page disconnected")
         return ws
+
+    # -- 3D view ----------------------------------------------------------------------------- #
+
+    async def _view_page(self, request: web.Request) -> web.FileResponse:
+        return web.FileResponse(VIEW, headers={"Cache-Control": "no-store"})
+
+    async def _view_socket(self, request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse(heartbeat=5.0)
+        await ws.prepare(request)
+        self._viewers.add(ws)
+        feeder = asyncio.ensure_future(self._feed_viewer(ws))
+        try:
+            async for _ in ws:  # the view sends nothing; reading notices when it closes
+                pass
+        finally:
+            feeder.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await feeder
+            self._viewers.discard(ws)
+        return ws
+
+    async def _feed_viewer(self, ws: web.WebSocketResponse) -> None:
+        """Send a 3D view the newest frame, at most _VIEW_HZ times a second, and the status."""
+        sent, status_at = -1, 0.0
+        try:
+            while not ws.closed:
+                message: dict = {}
+                if self.frames != sent:
+                    sent, frame = self.frames, self.latest()
+                    message["frame"] = None if frame is None else frame.to_dict()
+                now = time.perf_counter()
+                if now - status_at >= 0.5:
+                    status_at = now
+                    message["status"] = self._view_status()
+                if message:
+                    await ws.send_str(json.dumps(message, separators=(",", ":")))
+                await asyncio.sleep(1.0 / _VIEW_HZ)
+        except ConnectionError:
+            return  # the view closed while a message was on its way
+
+    def _view_status(self) -> dict:
+        rates = self.rates()
+        return {"page": self.connected, "url": self.url, "use_adb": self.use_adb,
+                "usb_ok": self.usb_ok, "usb": self.usb, "frames": self.frames,
+                "hz": rates["hz"], "changed_hz": rates["changed_hz"],
+                **{key: self.headset.get(key) for key in ("session", "mode", "fps", "space")}}
+
+    # -- frames from the headset ------------------------------------------------------------- #
 
     def _receive(self, data: bytes) -> None:
         try:

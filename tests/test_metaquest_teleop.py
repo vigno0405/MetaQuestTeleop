@@ -18,6 +18,7 @@ from metaquest_teleop.fake import stream, synthetic_hand
 from metaquest_teleop.hands import FRAME_BYTES, PARENT, Hand, Pose, decode, encode, rotations
 
 PAGE = files("metaquest_teleop") / "client.html"
+VIEW = files("metaquest_teleop") / "view.html"
 MIRROR = np.diag([-1.0, 1.0, 1.0])
 
 
@@ -145,6 +146,7 @@ def test_the_dashboard_renders_with_and_without_hands():
         text = console.export_text()
         headset.join(5.0)
     assert "LEFT" in text and "RIGHT" in text and "index" in text and "frames/s" in text
+    assert "3D view" in text and "/view" in text
 
 
 def test_malformed_text_messages_do_not_drop_the_headset_connection():
@@ -181,3 +183,75 @@ def test_the_command_line_parses_udp_addresses_and_reports_its_version(capsys, m
     with pytest.raises(SystemExit):
         main()
     assert __version__ in capsys.readouterr().out
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_the_3d_view_draws_hands_as_python_computes_them(tmp_path):
+    html = VIEW.read_text(encoding="utf-8")
+    rng = np.random.default_rng(6)
+    hand = synthetic_hand("right", _angles(rng), _pose(rng))
+    flat = synthetic_hand("right", np.zeros((5, 4)), _pose(rng))
+    quats = rng.normal(size=(5, 4))
+    script = tmp_path / "view.js"
+    script.write_text(html.split("// math-begin")[1].split("// math-end")[0] + f"""
+const joints = {json.dumps(np.hstack([hand.positions, hand.quaternions]).tolist())};
+const flat = {json.dumps(np.hstack([flat.positions, flat.quaternions]).tolist())};
+const cam = camera({{yaw: 0.3, pitch: 0.4, dist: 1.2, target: [0.1, 1.0, -0.3]}}, 800, 600);
+process.stdout.write(JSON.stringify({{
+  mats: {json.dumps(quats.tolist())}.map(quatToMat), hand: handFrame(joints), flat: handFrame(flat),
+  parent: PARENT, centre: cam.toScreen(cam.toCam([0.1, 1.0, -0.3])), eye: cam.eye}}));
+""", encoding="utf-8")
+    out = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True, check=True).stdout)
+
+    assert np.allclose(out["mats"], rotations(quats))
+    local = (hand.positions - hand.positions[0]) @ hand.rotations[0]  # each row R_wrist^T (p - p_wrist)
+    assert np.allclose(out["hand"], local[:, [0, 2, 1]] * [1.0, -1.0, 1.0])
+    index_tip, thumb_tip = out["flat"][9], out["flat"][4]
+    assert index_tip[1] > 0.1 and abs(index_tip[0]) < 0.03  # a flat hand's fingers point up
+    assert thumb_tip[0] < 0  # and a right thumb is on the left, seen from the back of the hand
+    assert out["parent"] == list(PARENT)
+    assert np.allclose(out["centre"], [400, 300])
+    assert np.isclose(np.linalg.norm(np.subtract(out["eye"], [0.1, 1.0, -0.3])), 1.2)
+
+    page_script = tmp_path / "view-page.js"
+    page_script.write_text(html.split("<script>")[1].split("</script>")[0], encoding="utf-8")
+    subprocess.run(["node", "--check", str(page_script)], check=True)
+
+
+def test_the_3d_view_receives_frames_and_status_with_only_the_right_hand():
+    import aiohttp
+
+    port = _free_port()
+
+    async def view(seconds):
+        messages = []
+        async with aiohttp.ClientSession() as session, \
+                session.ws_connect(f"ws://127.0.0.1:{port}/view/ws") as ws:
+            headset = asyncio.ensure_future(
+                stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=seconds, hands=("right",)))
+            loop = asyncio.get_running_loop()
+            end = loop.time() + seconds + 0.3
+            while loop.time() < end:
+                try:
+                    msg = await ws.receive(timeout=end - loop.time())
+                except asyncio.TimeoutError:
+                    break
+                if msg.type != aiohttp.WSMsgType.TEXT:
+                    break
+                messages.append(json.loads(msg.data))
+            await headset
+        return messages
+
+    with QuestHands(port, adb=False) as quest:
+        assert quest.view_url == f"http://localhost:{port}/view"
+        page = urllib.request.urlopen(f"http://127.0.0.1:{port}/view", timeout=3).read().decode()
+        assert "3D view" in page
+        messages = asyncio.run(view(1.0))
+
+    frames = [m["frame"] for m in messages if m.get("frame")]
+    statuses = [m["status"] for m in messages if "status" in m]
+    assert len(frames) > 20
+    assert all(f["right"] is not None and f["left"] is None for f in frames)
+    assert len(frames[-1]["right"]["joints"]) == 25
+    assert set(frames[-1]["right"]["angles"]) == set(ANGLE_NAMES)
+    assert any(s["page"] and s["session"] == "started" and s["mode"] == "fake" for s in statuses)

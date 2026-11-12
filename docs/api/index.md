@@ -1,14 +1,12 @@
 # API
 
-Scripts start with `from metaquest_teleop import QuestHands`. The classes of a frame and the
-constants of the hand are importable from `metaquest_teleop` too; the modules below hold the
-rest.
+Everything starts with `from metaquest_teleop import QuestHands`.
 
 ## The stream
 
 ```{eval-rst}
 .. autoclass:: metaquest_teleop.QuestHands
-   :members: start, stop, wait, latest, on_frame, rates, url, connected
+   :members: start, stop, wait, latest, on_frame, rates, url, view_url, connected
 ```
 
 ## Frames and hands
