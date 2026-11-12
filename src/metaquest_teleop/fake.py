@@ -98,14 +98,14 @@ async def stream(url: str, hz: float = 90.0, seconds: float | None = None) -> in
         await ws.send_str(json.dumps({"hello": {"agent": "metaquest-teleop fake headset"}}))
         await ws.send_str(json.dumps({"session": "started", "mode": "fake", "space": "local-floor",
                                       "fps": hz, "rates": [hz]}))
-        start, seq = time.monotonic(), 0
-        while seconds is None or time.monotonic() - start < seconds:
-            t = time.monotonic() - start
+        start, seq = time.perf_counter(), 0
+        while seconds is None or time.perf_counter() - start < seconds:
+            t = time.perf_counter() - start
             hands = {side: synthetic_hand(side, *pose_at(t, side)) for side in ("left", "right")}
             head = Pose(np.array([0.0, 1.6, 0.0]), np.array([0.0, 0.0, 0.0, 1.0]))
             await ws.send_bytes(encode(seq, t, head, hands["left"], hands["right"]))
             seq += 1
-            await asyncio.sleep(max(0.0, start + seq / hz - time.monotonic()))
+            await asyncio.sleep(max(0.0, start + seq / hz - time.perf_counter()))
         await ws.send_str(json.dumps({"session": "ended"}))
     return seq
 

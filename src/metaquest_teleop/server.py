@@ -142,7 +142,7 @@ class QuestHands:
 
     def rates(self) -> dict:
         """frames/s over the last second, of which carried changed hand data, interval p95, age."""
-        now = time.monotonic()
+        now = time.perf_counter()
         with self._cond:
             arrivals = list(self._arrivals)
         last_second = [changed for t, changed in arrivals if now - t <= 1.0]
@@ -214,7 +214,7 @@ class QuestHands:
         with self._cond:
             self._latest = frame
             self.frames += 1
-            self._arrivals.append((time.monotonic(), changed))
+            self._arrivals.append((time.perf_counter(), changed))
             self._cond.notify_all()
         for callback in list(self._callbacks):
             try:

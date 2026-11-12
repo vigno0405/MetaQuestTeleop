@@ -91,14 +91,14 @@ def test_the_page_packs_frames_exactly_as_python_reads_them(tmp_path):
 const head = new Float32Array({json.dumps(head.tolist())});
 const right = new Float32Array({json.dumps(right.ravel().tolist())});
 process.stdout.write(Buffer.from(packFrame(4294967298, 12.25, head, null, right)).toString("hex"));
-""")
+""", encoding="utf-8")
     out = subprocess.run(["node", str(script)], capture_output=True, text=True, check=True).stdout
     expected = encode(4294967298, 12.25, Pose(head[:3], head[3:]), None,
                       Hand("right", right[:, :3], right[:, 3:]))
     assert bytes.fromhex(out) == expected
 
     page_script = tmp_path / "page.js"
-    page_script.write_text(html.split("<script>")[1].split("</script>")[0])
+    page_script.write_text(html.split("<script>")[1].split("</script>")[0], encoding="utf-8")
     subprocess.run(["node", "--check", str(page_script)], check=True)
 
 
