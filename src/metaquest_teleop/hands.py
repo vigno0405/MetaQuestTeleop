@@ -16,6 +16,9 @@ from functools import cached_property
 
 import numpy as np
 
+#: The 25 joints of each hand, as WebXR names them, in the order of the rows of
+#: :attr:`Hand.positions <metaquest_teleop.Hand.positions>` and
+#: :attr:`Hand.quaternions <metaquest_teleop.Hand.quaternions>`.
 JOINTS = (
     "wrist",
     "thumb-metacarpal", "thumb-phalanx-proximal", "thumb-phalanx-distal", "thumb-tip",
@@ -28,9 +31,13 @@ JOINTS = (
     "pinky-finger-metacarpal", "pinky-finger-phalanx-proximal",
     "pinky-finger-phalanx-intermediate", "pinky-finger-phalanx-distal", "pinky-finger-tip",
 )
+#: For each joint, the index of its parent joint in :data:`JOINTS`; -1 for the wrist.
 PARENT = (-1, 0, 1, 2, 3, 0, 5, 6, 7, 8, 0, 10, 11, 12, 13, 0, 15, 16, 17, 18, 0, 20, 21, 22, 23)
 
+#: The five fingers, in the order of the rows of
+#: :attr:`Hand.angles <metaquest_teleop.Hand.angles>`.
 FINGERS = ("thumb", "index", "middle", "ring", "pinky")
+#: The names of the 20 joint angles, in the order of ``hand.angles.ravel()``.
 ANGLE_NAMES = (
     "thumb_cmc_flex", "thumb_cmc_abd", "thumb_mcp_flex", "thumb_ip_flex",
     "index_mcp_flex", "index_mcp_abd", "index_pip_flex", "index_dip_flex",
@@ -48,10 +55,12 @@ _BENDS = np.array([
     [[20, 21], [21, 22], [22, 23]],     # pinky
 ])
 
+#: The first four bytes of every binary frame from the headset.
 MAGIC = b"QHS1"
 _HEADER = struct.Struct("<4sIdB3x")
 _HAND_FLOATS = len(JOINTS) * 7
 _FLOATS = 7 + 2 * _HAND_FLOATS
+#: The size of one binary frame: a 20-byte header and 357 float32 values.
 FRAME_BYTES = _HEADER.size + 4 * _FLOATS
 
 
@@ -79,8 +88,12 @@ def _quat_multiply(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 @dataclass(frozen=True, eq=False)
 class Pose:
-    position: np.ndarray    # (3,) metres
-    quaternion: np.ndarray  # (4,) x, y, z, w
+    """A position and an orientation, in the session's ``local-floor`` space."""
+
+    #: (3,) position, metres.
+    position: np.ndarray
+    #: (4,) orientation, a unit quaternion (x, y, z, w).
+    quaternion: np.ndarray
 
     @property
     def rotation(self) -> np.ndarray:
@@ -97,15 +110,22 @@ class Pose:
 
 @dataclass(frozen=True, eq=False)
 class Hand:
-    side: str               # "left" or "right"
-    positions: np.ndarray   # (25, 3) joint positions, in JOINTS order
-    quaternions: np.ndarray  # (25, 4) joint orientations
+    """One tracked hand: the pose of each of its 25 joints, and what follows from them."""
+
+    #: ``"left"`` or ``"right"``.
+    side: str
+    #: (25, 3) joint positions, metres, in :data:`~metaquest_teleop.hands.JOINTS` order.
+    positions: np.ndarray
+    #: (25, 4) joint orientations, unit quaternions (x, y, z, w), in the same order.
+    quaternions: np.ndarray
 
     @property
     def wrist(self) -> Pose:
+        """The wrist's pose: the hand's position and orientation."""
         return Pose(self.positions[0], self.quaternions[0])
 
     def joint(self, name: str) -> Pose:
+        """The pose of one joint by its WebXR name, for example ``"index-finger-tip"``."""
         i = JOINTS.index(name)
         return Pose(self.positions[i], self.quaternions[i])
 
@@ -154,6 +174,7 @@ class Hand:
         return float(np.linalg.norm(self.positions[4] - self.positions[9]))
 
     def to_dict(self) -> dict:
+        """Wrist pose, angles by name, pinch and the 25 joints as (x, y, z, qx, qy, qz, qw) rows."""
         return {
             "wrist": {"position": self.positions[0].tolist(), "quaternion": self.quaternions[0].tolist()},
             "angles": self.angle_dict,
@@ -164,17 +185,27 @@ class Hand:
 
 @dataclass(frozen=True, eq=False)
 class Frame:
-    seq: int                 # frame counter from the headset
-    time: float              # headset clock, seconds
-    received: float          # time.time() on this computer when it arrived
+    """Everything the headset reported for one rendered frame."""
+
+    #: Frame counter from the headset; it restarts when the page reloads.
+    seq: int
+    #: The headset's clock when it rendered the frame, seconds.
+    time: float
+    #: ``time.time()`` on this computer when the frame arrived.
+    received: float
+    #: The headset's pose, or None if it was not tracked.
     head: Pose | None
+    #: The left hand, or None while it is not tracked.
     left: Hand | None
+    #: The right hand, or None while it is not tracked.
     right: Hand | None
 
     def hand(self, side: str) -> Hand | None:
+        """The ``"left"`` or ``"right"`` hand, or None while it is not tracked."""
         return self.left if side == "left" else self.right
 
     def to_dict(self) -> dict:
+        """The frame as plain lists and dicts, ready for ``json.dumps``; the UDP format."""
         return {
             "seq": self.seq, "time": self.time, "received": self.received,
             "head": None if self.head is None else {"position": self.head.position.tolist(),

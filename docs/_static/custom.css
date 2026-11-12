@@ -1,0 +1,121 @@
+/* The look of the VirtualModelControl documentation: large type, bold titles, a deep navy
+   header on a cool, very light page; deep blues in dark mode; links in blue, red accent. */
+.md-typeset {
+  font-size: 0.85rem;
+}
+.md-typeset h1,
+.md-typeset h2 {
+  color: var(--md-default-fg-color);
+  font-weight: 700;
+}
+.md-typeset h3 {
+  font-weight: 600;
+}
+/* The page title links to the page already; its hidden permalink would wrap on phones. */
+.md-typeset h1 .headerlink {
+  display: none;
+}
+
+/* The logo in the header, large enough to read. */
+.md-header__button.md-logo svg,
+.md-header__button.md-logo img {
+  height: 1.6rem;
+  width: auto;
+}
+
+/* The layout fills wide windows. */
+.md-grid {
+  max-width: 68rem;
+}
+
+/* The opening page belongs to no section and shows no index on a wide screen. Where the index
+   is a menu behind the button of the header, it stays there, listing all the sections. */
+@media screen and (max-width: 76.1875em) {
+  .md-sidebar--primary[hidden] {
+    display: block !important;
+  }
+}
+
+[data-md-color-primary="custom"] {
+  --md-primary-fg-color: #13294b;
+  --md-primary-fg-color--light: #1f3d6b;
+  --md-primary-fg-color--dark: #0b1b33;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.72);
+}
+[data-md-color-accent="custom"] {
+  --md-accent-fg-color: #e64b35;
+  --md-accent-fg-color--transparent: rgba(230, 75, 53, 0.1);
+  --md-accent-bg-color: #ffffff;
+  --md-accent-bg-color--light: rgba(255, 255, 255, 0.72);
+}
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: #f5f8fc;
+  --md-code-bg-color: #e9eff7;
+  --md-typeset-a-color: #2b5797;
+  --md-footer-bg-color: #13294b;
+  --md-footer-bg-color--dark: #0b1b33;
+}
+[data-md-color-scheme="slate"] {
+  --md-hue: 216;
+  --md-default-bg-color: #0d1a2d;
+  --md-default-bg-color--light: rgba(13, 26, 45, 0.54);
+  --md-default-bg-color--lighter: rgba(13, 26, 45, 0.26);
+  --md-default-bg-color--lightest: rgba(13, 26, 45, 0.07);
+  --md-code-bg-color: #13243d;
+  --md-typeset-a-color: #8ab4f8;
+  --md-footer-bg-color: #08121f;
+  --md-footer-bg-color--dark: #050c16;
+}
+[data-md-color-scheme="slate"][data-md-color-primary="custom"] {
+  --md-primary-fg-color: #08121f;
+  --md-primary-fg-color--light: #12223a;
+  --md-primary-fg-color--dark: #050c16;
+}
+[data-md-color-scheme="slate"][data-md-color-accent="custom"] {
+  --md-accent-fg-color: #ff7b66;
+  --md-accent-fg-color--transparent: rgba(255, 123, 102, 0.12);
+}
+
+/* Figures: never wider than the text, on a white card in dark mode too. */
+.md-typeset figure img,
+.md-typeset img.diagram {
+  max-width: 100%;
+  height: auto;
+  background: #fff;
+  border-radius: 0.3rem;
+}
+.md-typeset figure figcaption {
+  font-size: 0.85em;
+  color: var(--md-default-fg-color--light);
+}
+
+/* The terminal dashboard drawn in text: no wrapping, its own sideways scroll on a phone. */
+.md-typeset pre.dashboard,
+.md-typeset div.dashboard pre {
+  white-space: pre;
+  overflow-x: auto;
+  line-height: 1.25;
+}
+
+/* Reference tables: names on one line and a readable last column; on a phone a wide table
+   scrolls sideways inside itself instead of squeezing its columns. */
+.md-typeset table.docutils td code {
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+.md-typeset table.docutils td:last-child {
+  min-width: 14em;
+}
+@media screen and (max-width: 44.9375em) {
+  .md-typeset table.docutils.data:not(.plain) td,
+  .md-typeset table.docutils.data:not(.plain) th {
+    min-width: 0;
+    padding: 0.6em 0.5em;
+  }
+  .md-typeset table.docutils td code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

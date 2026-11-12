@@ -19,6 +19,7 @@ from aiohttp import WSMsgType, web
 from .hands import Frame, decode
 
 PAGE = Path(__file__).with_name("client.html")
+#: The port of the page and the stream unless you choose another.
 DEFAULT_PORT = 8012
 _HANDS_OFFSET = 48
 
@@ -51,13 +52,40 @@ def adb_reverse(port: int) -> tuple[bool, str]:
 class QuestHands:
     """Hand tracking from a Meta Quest, received in background threads.
 
+    ::
+
         with QuestHands() as quest:      # then open http://localhost:8012 in the Quest browser
             frame = quest.wait()         # the next frame from the headset
             frame.right.wrist.position   # metres
             frame.right.angles           # (5, 4) radians
 
-    The server listens on 127.0.0.1 only: the headset reaches it through `adb reverse`, and
-    nothing else on the network can inject frames. Pass host="0.0.0.0" to change that.
+    The server listens on 127.0.0.1 only: the headset reaches it through ``adb reverse``, and
+    nothing else on the network can inject frames. Pass ``host="0.0.0.0"`` to change that.
+
+    Parameters
+    ----------
+    port
+        Port of the page and the stream: the headset opens ``http://localhost:<port>``.
+    adb
+        Keep the USB link up with ``adb reverse`` while no page is connected.
+    udp
+        ``(host, port)`` to also send every frame to, as one JSON datagram; None for no UDP.
+    host
+        The interface to listen on.
+
+    Attributes
+    ----------
+    frames : int
+        Frames received since the start.
+    headset : dict
+        What the connected page reported: ``agent``, ``mode``, ``fps``, ``space``,
+        ``session`` and ``stats``; empty while no page is connected.
+    usb_ok : bool
+        Whether the last USB check succeeded.
+    usb : str
+        The USB link's status, as the dashboard shows it.
+    events : collections.deque
+        The last six ``(time.time(), text)`` status events.
     """
 
     def __init__(self, port: int = DEFAULT_PORT, adb: bool = True,
@@ -85,6 +113,10 @@ class QuestHands:
     # -- lifecycle --------------------------------------------------------------------------- #
 
     def start(self) -> QuestHands:
+        """Serve the page and the stream in background threads; returns ``self``.
+
+        Raises OSError if the port is taken, for example by another running copy.
+        """
         self._thread = threading.Thread(target=self._run, name="metaquest-teleop", daemon=True)
         self._thread.start()
         self._ready.wait(10.0)
@@ -98,6 +130,7 @@ class QuestHands:
         return self
 
     def stop(self) -> None:
+        """Stop serving and watching USB; a pending :meth:`wait` returns None."""
         self._stopping.set()
         with self._cond:
             self._cond.notify_all()
@@ -118,10 +151,12 @@ class QuestHands:
 
     @property
     def url(self) -> str:
+        """The address to open in the Quest browser."""
         return f"http://localhost:{self.port}"
 
     @property
     def connected(self) -> bool:
+        """Whether a headset page is connected."""
         return bool(self._clients)
 
     def latest(self) -> Frame | None:

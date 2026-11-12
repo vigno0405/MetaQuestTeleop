@@ -1,10 +1,15 @@
 # MetaQuestTeleop
 
+[![Documentation](https://img.shields.io/badge/Documentation-guides%20%C2%B7%20API-3c5488?labelColor=13294b)](https://vigno0405.github.io/MetaQuestTeleop/)
+[![PyPI](https://img.shields.io/pypi/v/metaquest-teleop?color=3c5488&labelColor=13294b)](https://pypi.org/project/metaquest-teleop/)
 [![CI](https://github.com/vigno0405/MetaQuestTeleop/actions/workflows/ci.yml/badge.svg)](https://github.com/vigno0405/MetaQuestTeleop/actions/workflows/ci.yml)
 
 Stream hand tracking from a Meta Quest to Python over a USB cable, for teleoperation: both
 wrist poses, all 25 joints of each hand and 20 joint angles per hand, at the highest frame
 rate the headset offers, with a live dashboard in the terminal.
+
+**Documentation: https://vigno0405.github.io/MetaQuestTeleop/**: installation, a quickstart,
+guides for teleoperating a robot, and the API.
 
 ```text
 ╭─ Quest hand stream ──────────────────────────────────────────────────────────╮

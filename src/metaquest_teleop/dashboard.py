@@ -104,6 +104,7 @@ def _hand(side: str, hand: Hand | None) -> Panel:
 
 
 def render(quest: QuestHands, width: int = 120) -> Group:
+    """The dashboard for the current state of ``quest``, as a rich renderable ``width`` wide."""
     frame = quest.latest()
     fresh = frame is not None and time.time() - frame.received < _STALE_S
     left, right = (frame.left, frame.right) if fresh else (None, None)
