@@ -11,7 +11,6 @@ extensions = [
     "myst_parser",
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
-    "sphinx.ext.intersphinx",
     "sphinx_immaterial",
 ]
 
@@ -22,12 +21,6 @@ autodoc_typehints = "signature"
 autodoc_member_order = "bysource"
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
-
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", None),
-    "numpy": ("https://numpy.org/doc/stable", None),
-}
-intersphinx_timeout = 30  # seconds: a bad network fails the build instead of hanging it
 
 html_theme = "sphinx_immaterial"
 html_title = "metaquest-teleop"
