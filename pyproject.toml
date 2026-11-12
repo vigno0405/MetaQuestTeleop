@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metaquest-teleop"
+dynamic = ["version"]
+description = "Meta Quest hand tracking streamed to Python over USB, for teleoperation: wrist poses, 25 joints and 20 joint angles per hand."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Lorenzo Vignoli" }]
+requires-python = ">=3.10"
+dependencies = ["aiohttp>=3.8", "numpy>=1.21", "rich>=12"]
+keywords = ["meta quest", "quest 3", "webxr", "hand tracking", "teleoperation", "robotics", "vr"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+    "Topic :: System :: Hardware",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+metaquest-teleop = "metaquest_teleop.cli:main"
+metaquest-teleop-fake = "metaquest_teleop.fake:main"
+
+[project.urls]
+Homepage = "https://github.com/vigno0405/MetaQuestTeleop"
+Issues = "https://github.com/vigno0405/MetaQuestTeleop/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "metaquest_teleop.__version__" }
+
+[tool.setuptools.package-data]
+metaquest_teleop = ["client.html", "py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
