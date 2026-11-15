@@ -20,7 +20,8 @@ details, including the one-time setup of the headset.
 
 ## See your hands in 3D
 
-Open **http://localhost:8012/view** on your computer. More in [3D view](view.md).
+Open **http://localhost:8012/view** on your computer, or [try it now in your
+browser](view.md#try-it-here), with a fake hand.
 
 ![The 3D view: a right hand on its forearm, with its joint angles](_static/view-hand.png)
 

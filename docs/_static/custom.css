@@ -90,6 +90,21 @@
   color: var(--md-default-fg-color--light);
 }
 
+/* The live demo of the 3D view, embedded in its page. */
+.md-typeset iframe.demo {
+  display: block;
+  width: 100%;
+  height: 660px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.4rem;
+  background: #0d1a2d;
+}
+@media screen and (max-width: 44.9375em) {
+  .md-typeset iframe.demo {
+    height: 480px;
+  }
+}
+
 /* Screenshots of the 3D view: rounded, with a thin edge. */
 .md-typeset img[src*="view-"] {
   border-radius: 0.4rem;

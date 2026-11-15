@@ -255,3 +255,32 @@ def test_the_3d_view_receives_frames_and_status_with_only_the_right_hand():
     assert len(frames[-1]["right"]["joints"]) == 25
     assert set(frames[-1]["right"]["angles"]) == set(ANGLE_NAMES)
     assert any(s["page"] and s["session"] == "started" and s["mode"] == "fake" for s in statuses)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_the_3d_views_demo_makes_the_same_fake_hands_as_python(tmp_path):
+    from metaquest_teleop.fake import pose_at
+
+    html = VIEW.read_text(encoding="utf-8")
+    rng = np.random.default_rng(7)
+    cases = [(side, _angles(rng), _pose(rng)) for side in ("left", "right", "right")]
+    times = [0.0, 0.7, 3.3, 11.9]
+    script = tmp_path / "demo.js"
+    script.write_text(html.split("// math-begin")[1].split("// math-end")[0] + f"""
+const cases = {json.dumps([[s, a.tolist(), p.position.tolist(), p.quaternion.tolist()] for s, a, p in cases])};
+const times = {json.dumps(times)};
+process.stdout.write(JSON.stringify({{
+  hands: cases.map(([side, a, p, q]) => fakeHand(side, a, p, q)),
+  poses: times.flatMap((t) => ["left", "right"].map((side) => fakePose(t, side))),
+}}));
+""", encoding="utf-8")
+    out = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True, check=True).stdout)
+
+    for (side, angles, pose), js in zip(cases, out["hands"]):
+        hand = synthetic_hand(side, angles, pose)
+        assert np.allclose(js["positions"], hand.positions, atol=1e-12)
+        assert np.allclose(js["quaternions"], hand.quaternions, atol=1e-12)
+    for (t, side), js in zip([(t, s) for t in times for s in ("left", "right")], out["poses"]):
+        angles, wrist = pose_at(t, side)
+        assert np.allclose(js["angles"], angles) and np.allclose(js["position"], wrist.position)
+        assert np.allclose(js["quaternion"], wrist.quaternion)

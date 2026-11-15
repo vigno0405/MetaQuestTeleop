@@ -82,6 +82,7 @@ html_theme_options = {
 html_copy_source = False
 html_show_sourcelink = False
 html_show_copyright = False
-html_static_path = ["_static"]
+# The 3D view comes straight from the package, so the demo in the docs is the real page.
+html_static_path = ["_static", "../src/metaquest_teleop/view.html"]
 html_css_files = ["custom.css"]
 add_module_names = False
