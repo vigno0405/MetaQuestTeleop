@@ -38,7 +38,7 @@ with QuestHands() as quest:
 
 More in [Use it in Python](python.md).
 
-Written by Gregorio Valenti. MIT license. Source on
+Written by Gregorio Valenti and Lorenzo Vignoli. MIT license. Source on
 [GitHub](https://github.com/vigno0405/MetaQuestTeleop).
 
 ```{toctree}

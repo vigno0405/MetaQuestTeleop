@@ -3,7 +3,7 @@
 from importlib.metadata import version as _version
 
 project = "metaquest-teleop"
-author = "Gregorio Valenti"
+author = "Gregorio Valenti, Lorenzo Vignoli"
 release = _version("metaquest-teleop")
 version = ".".join(release.split(".")[:2])
 

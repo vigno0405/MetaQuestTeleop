@@ -46,4 +46,4 @@ with QuestHands() as quest:
 
 ## License
 
-MIT. Written by Gregorio Valenti.
+MIT. Written by Gregorio Valenti and Lorenzo Vignoli.
