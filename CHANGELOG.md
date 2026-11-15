@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- `metaquest_teleop.adapt`: your hand on the ADAPT hand. `joint_angles` gives its 20 joint
+  angles, with PIP and DIP apart; `motor_angles` its 13 motor angles, the closest fit through
+  the couplings (PIP and DIP averaged, one spread for all fingers); `wrist_pose` your wrist
+  with the ADAPT hand's axes. The geometry is that of `virtualmodelcontrol.robots.adapt`.
+- The 3D view's ADAPT mode: your hand next to the ADAPT hand its motors would make, with its
+  joint and motor angles; also in the documentation, as a live demo.
+
 ## 0.2.0 (2026-11-15)
 
 - 3D view of the hands in a browser, at http://localhost:8012/view while the stream runs:

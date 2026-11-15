@@ -284,3 +284,96 @@ process.stdout.write(JSON.stringify({{
         angles, wrist = pose_at(t, side)
         assert np.allclose(js["angles"], angles) and np.allclose(js["position"], wrist.position)
         assert np.allclose(js["quaternion"], wrist.quaternion)
+
+
+# -- the ADAPT hand ---------------------------------------------------------------------------- #
+
+def test_adapt_geometry_is_the_one_of_virtualmodelcontrol():
+    vmc = pytest.importorskip("virtualmodelcontrol")
+    from virtualmodelcontrol.robots import adapt as lib
+
+    from metaquest_teleop import adapt
+
+    assert np.allclose(adapt.COUPLING, lib.hand_coupling(), atol=1e-15)
+    assert adapt.MOTORS == lib.HAND_MOTORS
+    assert adapt.JOINT_LIMITS == {k: tuple(v) for k, v in lib.HAND_JOINT_LIMITS.items()}
+    kin = vmc.Kinematics(lib.hand())
+    for q in np.random.default_rng(8).uniform(-1, 1, (10, 13)):
+        ours = adapt.positions(adapt.COUPLING @ q)
+        for digit in adapt.DIGITS:
+            assert np.allclose(np.ravel(kin.position(q, f"{digit}/tip")), ours[digit][-1], atol=1e-12)
+
+
+def test_adapt_thumb_points_its_metacarpal_where_asked():
+    from metaquest_teleop.adapt import DIGIT_JOINTS, _rotation, thumb_cmc
+
+    (_, a1), (_, a2), (o3, _), _ = DIGIT_JOINTS["thumb"]
+    rng = np.random.default_rng(9)
+    for cmc1, cmc2 in zip(rng.uniform(0.0, 1.5, 100), rng.uniform(-0.5, 0.5, 100)):
+        direction = _rotation(a1, cmc1) @ _rotation(a2, cmc2) @ np.array(o3)
+        assert np.allclose(thumb_cmc(direction), (cmc1, cmc2), atol=1e-9)
+
+
+def test_adapt_joints_take_your_angles_and_the_motors_reduce_them():
+    from metaquest_teleop import adapt
+    from metaquest_teleop.adapt import DIGIT_JOINTS, _rotation
+
+    rng = np.random.default_rng(10)
+    hand = synthetic_hand("right", _angles(rng), _pose(rng))
+    a, joints = hand.angles, adapt.joint_angles(hand)
+    for f in range(1, 5):  # fingers: spread with the ADAPT sign, then MCP, PIP and DIP as they are
+        assert np.allclose(joints[4 * f:4 * f + 4], [-a[f, 1], a[f, 0], a[f, 2], a[f, 3]])
+    assert np.allclose(joints[2:4], a[0, 2:4])
+    (_, a1), (_, a2), (o3, _), _ = DIGIT_JOINTS["thumb"]  # the thumb's metacarpal points as yours
+    robot = _rotation(a1, joints[0]) @ _rotation(a2, joints[1]) @ np.array(o3)
+    yours = np.diag([1.0, -1.0, -1.0]) @ hand.rotations[0].T @ (hand.positions[2] - hand.positions[1])
+    assert np.allclose(robot / np.linalg.norm(robot), yours / np.linalg.norm(yours), atol=1e-9)
+
+    motors = adapt.motor_angles(joints, clip=False)
+    back = adapt.COUPLING @ motors
+    assert np.allclose(back[[0, 1, 2, 3, 5, 9, 13, 17]], joints[[0, 1, 2, 3, 5, 9, 13, 17]])
+    for pip in (6, 10, 14, 18):  # each PIP motor: the mean of its PIP and DIP
+        assert np.isclose(back[pip], (joints[pip] + joints[pip + 1]) / 2) and np.isclose(back[pip + 1], back[pip])
+    q = rng.uniform(-1, 1, 13)  # joints the motors can make come back as those motors
+    assert np.allclose(adapt.motor_angles(adapt.COUPLING @ q, clip=False), q)
+    clipped = adapt.COUPLING @ adapt.motor_angles(np.full(20, 5.0))  # clip: every joint in range
+    assert np.all(clipped <= np.array([adapt.JOINT_LIMITS[j][1] for j in adapt.JOINTS]) + 1e-9)
+    assert np.allclose(adapt.motor_angles(hand), adapt.motor_angles(joints))
+
+
+def test_adapt_wrist_pose_has_the_axes_of_the_adapt_base():
+    from metaquest_teleop import adapt
+
+    hand = synthetic_hand("right", np.zeros((5, 4)), _pose(np.random.default_rng(11)))
+    pose = adapt.wrist_pose(hand)
+    assert np.allclose(pose.position, hand.wrist.position)
+    assert np.allclose(pose.rotation, hand.rotations[0] @ np.diag([1.0, -1.0, -1.0]))
+    tip = pose.rotation.T @ (hand.positions[14] - hand.positions[0])  # a flat hand points along +z
+    assert tip[2] > 0.9 * np.linalg.norm(tip)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_the_3d_views_adapt_hand_is_the_python_one(tmp_path):
+    from metaquest_teleop import adapt
+
+    html = VIEW.read_text(encoding="utf-8")
+    rng = np.random.default_rng(12)
+    hands = [synthetic_hand("right", _angles(rng), _pose(rng)) for _ in range(4)]
+    script = tmp_path / "adapt.js"
+    script.write_text(html.split("// math-begin")[1].split("// math-end")[0] + f"""
+const hands = {json.dumps([[h.angles.tolist(), np.hstack([h.positions, h.quaternions]).tolist()] for h in hands])};
+const joints = hands.map(([a, j]) => adaptJoints(a, j));
+process.stdout.write(JSON.stringify({{
+  coupling: ADAPT_COUPLING, joints, motors: joints.map((j) => adaptMotors(j)),
+  free: joints.map((j) => adaptMotors(j, false)), shapes: joints.map(adaptPositions),
+}}));
+""", encoding="utf-8")
+    out = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True, check=True).stdout)
+
+    assert np.allclose(out["coupling"], adapt.COUPLING)
+    for hand, joints, motors, free, shape in zip(hands, out["joints"], out["motors"], out["free"], out["shapes"]):
+        assert np.allclose(joints, adapt.joint_angles(hand), atol=1e-12)
+        assert np.allclose(motors, adapt.motor_angles(hand), atol=1e-12)
+        assert np.allclose(free, adapt.motor_angles(hand, clip=False), atol=1e-12)
+        for digit, points in adapt.positions(adapt.joint_angles(hand)).items():
+            assert np.allclose(shape[digit], points, atol=1e-12)

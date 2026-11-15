@@ -37,7 +37,7 @@ with QuestHands() as quest:
             print(frame.right.wrist.position, frame.right.pinch)
 ```
 
-More in [Use it in Python](python.md).
+More in [Use it in Python](python.md). Driving the ADAPT hand? See [ADAPT Hand](adapt.md).
 
 Written by Gregorio Valenti and Lorenzo Vignoli. MIT license. Source on
 [GitHub](https://github.com/vigno0405/MetaQuestTeleop).
@@ -57,6 +57,13 @@ troubleshooting
 
 python
 data
+```
+
+```{toctree}
+:hidden:
+:caption: ADAPT Hand
+
+adapt
 ```
 
 ```{toctree}

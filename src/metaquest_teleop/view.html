@@ -51,6 +51,9 @@
   table.angles td { padding: 1px 4px; white-space: nowrap; }
   table.angles td:first-child { color: var(--dim); }
   .caption { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  table.angles td.out { color: var(--warn); }
+  table.angles tr.sub th { padding-top: 6px; }
+  #adapt-panel h2 { font-size: 12.5px; font-weight: 600; color: var(--dim); margin-top: 10px; }
   .bar {
     display: inline-block; width: 30px; height: 6px; margin-right: 4px; border-radius: 3px;
     background: rgba(138, 180, 248, 0.16); vertical-align: middle; overflow: hidden;
@@ -107,6 +110,7 @@
   <div class="seg" data-key="mode">
     <button data-value="room" title="Both hands where they are, in the headset's space">Room</button>
     <button data-value="hand" title="One hand in its wrist's frame: only the fingers move">Hand</button>
+    <button data-value="adapt" title="Your hand next to the ADAPT hand it drives">ADAPT</button>
   </div>
   <div class="seg" data-key="side">
     <button data-value="right">Right hand</button>
@@ -124,11 +128,20 @@
   <h1 id="hand-title">RIGHT <span>not tracked</span></h1>
   <div class="mono" id="hand-wrist">wrist –</div>
   <div class="mono" id="hand-pinch">pinch –</div>
-  <table class="angles mono">
-    <thead><tr><th></th><th>base</th><th>spread</th><th>middle</th><th>tip</th></tr></thead>
-    <tbody id="angles"></tbody>
-  </table>
-  <div class="caption">Bend at the base, middle and tip joints; spread sideways at the base.</div>
+  <div id="human-panel">
+    <table class="angles mono">
+      <thead><tr><th></th><th>base</th><th>spread</th><th>middle</th><th>tip</th></tr></thead>
+      <tbody id="angles"></tbody>
+    </table>
+    <div class="caption">Bend at the base, middle and tip joints; spread sideways at the base.</div>
+  </div>
+  <div id="adapt-panel" hidden>
+    <h2>ADAPT joints, from your hand (°)</h2>
+    <table class="angles mono" id="adapt-joints"></table>
+    <h2>ADAPT motors (rad)</h2>
+    <table class="angles mono" id="adapt-motors"></table>
+    <div class="caption">Amber: outside the robot's range.</div>
+  </div>
 </div>
 
 <div class="panel" id="hint">Drag to rotate · Shift-drag or right-drag to pan · Scroll to zoom · Double-click to reset</div>
@@ -280,6 +293,137 @@ function fakePose(t, side) {
   return { angles, position: [x + 0.05 * Math.cos(0.8 * t), 1.1 + 0.05 * Math.sin(0.8 * t), -0.4],
            quaternion: [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)] };
 }
+// The ADAPT hand, as metaquest_teleop.adapt: its geometry (virtualmodelcontrol.robots.adapt),
+// the pairing with your hand, and its motors.
+const ADAPT_DIGITS = ["thumb", "index", "middle", "ring", "pinky"];
+const ADAPT_PALM = [-0.017826, 0.003021, -0.027998];
+const ADAPT_BASES = {
+  thumb: [-0.001126, 0.011348, 0.056215], index: [-0.001654, 0.040836, 0.093101],
+  middle: [0.02173, 0.039146, 0.092417], ring: [0.032774, 0.039367, 0.090557],
+  pinky: [0.061943, 0.039534, 0.075302],
+};
+const ADAPT_JOINTS = {
+  thumb: [[[-0.014257, 0.010829, -0.007467], [0.182125, -0.177737, -0.967078]],
+          [[-0.008631, 0.00194, -0.008807], [0.0, 0.983527, -0.180761]],
+          [[-0.04412, -0.000957, -0.00886], [0.168863, 0.20364, -0.964373]],
+          [[-0.031464, -0.001054, -0.005732], [0.168863, 0.20364, -0.964373]]],
+  index: [[[-0.006284, 0.000712, 0.005798], [0.140517, 0.943569, -0.299886]],
+          [[-0.001682, -0.00044, 0.009499], [-0.981214, 0.092278, -0.169421]],
+          [[-0.005287, 0.012722, 0.037552], [-0.981214, 0.092278, -0.169421]],
+          [[-0.003966, 0.009542, 0.028164], [-0.981214, 0.092278, -0.169421]]],
+  middle: [[[-0.005011, 0.000697, 0.006929], [0.036359, 0.936295, -0.349327]],
+           [[0.000289, -0.000149, 0.009651], [-0.998268, 0.050205, 0.030661]],
+           [[0.002081, 0.015643, 0.042143], [-0.998268, 0.050205, 0.030661]],
+           [[0.001387, 0.010428, 0.028095], [-0.998268, 0.050205, 0.030661]]],
+  ring: [[[0.006841, 0.000228, 0.005174], [-0.055584, 0.937022, -0.34482]],
+         [[0.002501, -0.000155, 0.009326], [-0.964998, 0.038236, 0.259457]],
+         [[0.010252, 0.013887, 0.036084], [-0.964998, 0.038236, 0.259457]],
+         [[0.007689, 0.010415, 0.027062], [-0.964998, 0.038236, 0.259457]]],
+  pinky: [[[-0.001073, -0.000153, 0.008511], [-0.211896, 0.947676, -0.238768]],
+          [[0.004931, -0.000503, 0.008288], [-0.859324, -0.064308, 0.507372]],
+          [[0.014895, 0.010006, 0.026496], [-0.859324, -0.064308, 0.507372]],
+          [[0.009309, 0.006254, 0.016559], [-0.859324, -0.064308, 0.507372]]],
+};
+const ADAPT_TIP = [0.0, 0.0, 0.0175];
+const ADAPT_LIMITS = [[0, 1.5], [-0.5, 0.5], [0, 1.5], [0, 1.2],
+                      [-0.3, 0], [0, 1.5], [0, 1.2], [0, 1.2], [0, 0], [0, 1.5], [0, 1.2], [0, 1.2],
+                      [0, 0.3], [0, 1.5], [0, 1.2], [0, 1.2], [0, 0.3], [0, 1.5], [0, 1.2], [0, 1.2]];
+const ADAPT_FINGER_TRANSMISSIONS = {  // motor pulley, finger pulley, PIP cable constant [m]
+  index: [0.005, 0.00304, 0.0109], middle: [0.005, 0.00304, 0.01127],
+  ring: [0.005, 0.00304, 0.0109], pinky: [0.005, 0.00304, 0.00967],
+};
+const ADAPT_THUMB_TRANSMISSION = { r_motor: 0.005, CMC1_pulley: 0.01346, CMC2_pulley: 0.00883,
+                                   MCP_c: 0.00605, IP_c: 0.00577 };
+const ADAPT_SPREAD = { index: 1.0, middle: 0.0, ring: -1.0, pinky: -1.5 };
+
+// Joint angles = ADAPT_COUPLING (20 x 13) · motor angles.
+const ADAPT_COUPLING = (() => {
+  const t = ADAPT_THUMB_TRANSMISSION;
+  const c = Array.from({ length: 20 }, () => new Array(13).fill(0));
+  c[0][0] = t.r_motor / t.CMC1_pulley;
+  c[1][1] = t.r_motor / t.CMC2_pulley;
+  c[2][2] = -t.r_motor / t.MCP_c;
+  c[3][3] = -t.r_motor / t.IP_c;
+  ADAPT_DIGITS.slice(1).forEach((finger, k) => {
+    const row = 4 + 4 * k, [rMotor, rPulley, cPip] = ADAPT_FINGER_TRANSMISSIONS[finger];
+    c[row][4] = (-1 / 30) * ADAPT_SPREAD[finger];
+    c[row + 1][5 + 2 * k] = rPulley / rMotor;
+    c[row + 2][6 + 2 * k] = c[row + 3][6 + 2 * k] = -rMotor / cPip;
+  });
+  return c;
+})();
+
+const rotAxis = (axis, angle) => {
+  const [x, y, z] = norm(axis), c = Math.cos(angle), s = Math.sin(angle), t = 1 - c;
+  return [[c + x * x * t, x * y * t - z * s, x * z * t + y * s],
+          [y * x * t + z * s, c + y * y * t, y * z * t - x * s],
+          [z * x * t - y * s, z * y * t + x * s, c + z * z * t]];
+};
+const angleAbout = (w, p, q) => {
+  const u = sub(p, scale(w, dot(w, p))), v = sub(q, scale(w, dot(w, q)));
+  return Math.atan2(dot(w, cross(u, v)), dot(u, v));
+};
+
+// CMC1 and CMC2 that point the ADAPT thumb's metacarpal along `direction` (ADAPT base frame):
+// two rotations about crossing axes; of the two solutions, the one nearer the joints' mid-range.
+function adaptThumbCmc(direction) {
+  const w1 = norm(ADAPT_JOINTS.thumb[0][1]), w2 = norm(ADAPT_JOINTS.thumb[1][1]);
+  const p = norm(ADAPT_JOINTS.thumb[2][0]), q = norm(direction);
+  const c = dot(w1, w2), w12 = cross(w1, w2);
+  const alpha = (c * dot(w2, p) - dot(w1, q)) / (c * c - 1);
+  const beta = (c * dot(w1, q) - dot(w2, p)) / (c * c - 1);
+  const g2 = (1 - alpha * alpha - beta * beta - 2 * alpha * beta * c) / dot(w12, w12);
+  const [[lo1, hi1], [lo2, hi2]] = ADAPT_LIMITS;
+  let best = [0, 0], cost = Infinity;
+  for (const gamma of g2 > 0 ? [Math.sqrt(g2), -Math.sqrt(g2)] : [0]) {
+    const z = add(add(scale(w1, alpha), scale(w2, beta)), scale(w12, gamma));
+    const cmc1 = angleAbout(w1, z, q), cmc2 = angleAbout(w2, p, z);
+    const here = ((2 * cmc1 - lo1 - hi1) / (hi1 - lo1)) ** 2 + ((2 * cmc2 - lo2 - hi2) / (hi2 - lo2)) ** 2;
+    if (here < cost) { best = [cmc1, cmc2]; cost = here; }
+  }
+  return best;
+}
+
+// The 20 ADAPT joint angles for your hand: `angles` (5 rows of base, spread, middle, tip) and
+// `joints` (25 rows of x, y, z, qx, qy, qz, qw), as metaquest_teleop.adapt.joint_angles.
+function adaptJoints(angles, joints) {
+  const rw = quatToMat(joints[0].slice(3, 7));
+  const d = sub(joints[2].slice(0, 3), joints[1].slice(0, 3));
+  const local = [dot(column(rw, 0), d), dot(column(rw, 1), d), dot(column(rw, 2), d)];
+  const out = adaptThumbCmc([local[0], -local[1], -local[2]]).concat([angles[0][2], angles[0][3]]);
+  for (let f = 1; f < 5; f++) out.push(-angles[f][1], angles[f][0], angles[f][2], angles[f][3]);
+  return out;
+}
+
+// The 13 motor angles: the least-squares fit through the coupling, as adapt.motor_angles. Each
+// motor drives its own joints, so the fit splits: PIP and DIP averaged, one spread for all.
+function adaptMotors(joints, clip = true) {
+  const j = clip ? joints.map((v, i) => Math.min(Math.max(v, ADAPT_LIMITS[i][0]), ADAPT_LIMITS[i][1])) : joints;
+  const C = ADAPT_COUPLING, q = new Array(13).fill(0);
+  for (let m = 0; m < 13; m++) {
+    let num = 0, den = 0;
+    for (let r = 0; r < 20; r++) { num += C[r][m] * j[r]; den += C[r][m] * C[r][m]; }
+    q[m] = num / den;
+  }
+  return q;
+}
+
+// The ADAPT hand's shape: for each digit, its base, four joints and tip, in its base frame [m].
+function adaptPositions(joints) {
+  const out = {};
+  ADAPT_DIGITS.forEach((digit, d) => {
+    let p = add(ADAPT_PALM, ADAPT_BASES[digit]), r = IDENTITY;
+    const points = [p];
+    ADAPT_JOINTS[digit].forEach(([origin, axis], k) => {
+      p = add(p, matVec(r, origin));
+      points.push(p);
+      r = matMul(r, rotAxis(axis, joints[4 * d + k]));
+    });
+    points.push(add(p, matVec(r, ADAPT_TIP)));
+    out[digit] = points;
+  });
+  return out;
+}
 // math-end
 
 // ------------------------------------------------------------------------------- settings
@@ -302,7 +446,7 @@ const PINCH_CLOSED = 0.02;    // m
 
 const params = new URLSearchParams(location.search);
 const state = {
-  mode: params.get("mode") === "hand" ? "hand" : "room",
+  mode: ["hand", "adapt"].includes(params.get("mode")) ? params.get("mode") : "room",
   side: params.get("hand") === "left" ? "left" : "right",
   follow: true, trail: true, axes: true,
 };
@@ -310,6 +454,7 @@ const state = {
 // middle from the selected hand, so it looks as you see it. Hand: from the thumb's side.
 function home(mode, side) {
   const s = side === "right" ? 1 : -1;
+  if (mode === "adapt") return { yaw: -0.15 * s, pitch: 0.15, dist: 0.6, target: [0.0, 0.06, 0.0] };
   return mode === "room"
     ? { yaw: -0.35 * s, pitch: 0.5, dist: 0.6, target: [0.0, 1.1, -0.4] }
     : { yaw: -0.45 * s, pitch: 0.3, dist: 0.42, target: [0.0, 0.04, 0.0] };
@@ -545,6 +690,8 @@ function draw() {
         addLine(cam, trail[i - 1][1], trail[i][1], "#e6edf3", 0.0025, 0.7 * (1 - age));
       }
     }
+  } else if (hand && state.mode === "adapt") {
+    drawAdapt(camera(view, width, height), hand, alive ? 1 : 0.3);
   } else if (hand) {
     const cam = camera(view, width, height);
     const pts = handFrame(hand.joints);
@@ -558,6 +705,39 @@ function draw() {
   requestAnimationFrame(draw);
 }
 
+// Your hand on the left; on the right the ADAPT hand, where its motors would put it.
+const ADAPT_GAP = 0.095;  // m, from the middle to each wrist
+const handAngles = (hand) => FINGERS.map((_, f) => [0, 1, 2, 3].map((c) => hand.angles[ANGLE_NAMES[4 * f + c]]));
+
+function drawAdapt(cam, hand, alpha) {
+  const you = (p) => [p[0] - ADAPT_GAP, p[1], p[2]];
+  const fromWrist = (l) => [l[0], -l[2], l[1]];  // your wrist's frame (and the sleeve) to the screen
+  addSleeve(cam, (l) => you(fromWrist(l)), alpha);
+  addHand(cam, handFrame(hand.joints).map(you), alpha);
+  addLabel(cam, you([-0.03, 0.215, 0]), "your hand", WRIST_COLOR, alpha);
+
+  // The ADAPT base frame to the screen, with its wrist (the palm's origin) at the robot's place.
+  const robot = (a) => [a[0] - ADAPT_PALM[0] + ADAPT_GAP, a[2] - ADAPT_PALM[2], -(a[1] - ADAPT_PALM[1])];
+  const motors = adaptMotors(adaptJoints(handAngles(hand), hand.joints));
+  const joints = ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0));
+  const pts = adaptPositions(joints);
+  const wrist = robot(ADAPT_PALM);
+  addSleeve(cam, (l) => add(wrist, fromWrist(l)), alpha);
+  addPoly(cam, [wrist].concat(ADAPT_DIGITS.map((d) => robot(pts[d][0]))), "rgba(230, 237, 243, 0.14)", alpha);
+  ADAPT_DIGITS.forEach((d, f) => {
+    const q = pts[d].map(robot);
+    for (let k = 1; k < q.length; k++) addLine(cam, q[k - 1], q[k], COLORS[f], 0.006, alpha);
+    q.forEach((p, k) => addDot(cam, p, k === q.length - 1 ? 0.0075 : 0.0055, COLORS[f], alpha));
+  });
+  addDot(cam, wrist, 0.011, WRIST_COLOR, alpha);
+  addLabel(cam, add(wrist, [-0.03, 0.215, 0]), "ADAPT", WRIST_COLOR, alpha);
+
+  if (state.axes) {
+    addAxes(cam, you([0, 0, 0]), [[1, 0, 0], [0, 0, -1], [0, 1, 0]], 0.06, ["x", "y", "z"], alpha);
+    addAxes(cam, wrist, [[1, 0, 0], [0, 0, 1], [0, -1, 0]], 0.06, ["x", "y", "z"], alpha);
+  }
+}
+
 // ------------------------------------------------------------------------------- panels
 const $ = (id) => document.getElementById(id);
 const angleCells = FINGERS.map((finger) => {
@@ -566,6 +746,34 @@ const angleCells = FINGERS.map((finger) => {
   $("angles").appendChild(row);
   return Array.from(row.children).slice(1);
 });
+
+// The ADAPT tables: joints (fingers, then the thumb) and motors.
+const ADAPT_JOINT_ROWS = [
+  ["head", "", "spread", "MCP", "PIP", "DIP"],
+  ["index", 4, 5, 6, 7], ["middle", 8, 9, 10, 11], ["ring", 12, 13, 14, 15], ["pinky", 16, 17, 18, 19],
+  ["head", "", "CMC1", "CMC2", "MCP", "IP"], ["thumb", 0, 1, 2, 3],
+];
+const ADAPT_MOTOR_ROWS = [
+  ["head", "", "CMC1", "CMC2", "MCP", "IP"], ["thumb", 0, 1, 2, 3],
+  ["head", "", "MCP", "PIP"], ["index", 5, 6], ["middle", 7, 8], ["ring", 9, 10], ["pinky", 11, 12],
+  ["spread", 4],
+];
+
+function adaptTable(id, rows) {
+  const cells = [];
+  rows.forEach((row, i) => {
+    const tr = document.createElement("tr");
+    if (row[0] === "head") {
+      tr.className = i ? "sub" : "";
+      tr.innerHTML = row.slice(1).map((h) => `<th>${h}</th>`).join("");
+    } else {
+      tr.innerHTML = `<td>${row[0]}</td>` + row.slice(1).map(() => "<td></td>").join("");
+      Array.from(tr.children).slice(1).forEach((cell, k) => cells.push([cell, row[1 + k]]));
+    }
+    $(id).appendChild(tr);
+  });
+  return cells;
+}
 
 function setLine(name, kind, text) {
   $("d-" + name).className = "dot " + kind;
@@ -577,6 +785,21 @@ const deg = (rad, signed) => {
   return (signed && d > 0 ? "+" : "") + d + "°";
 };
 const signed = (v) => (v >= 0 ? "+" : "") + v.toFixed(3);
+const adaptJointCells = adaptTable("adapt-joints", ADAPT_JOINT_ROWS);
+const adaptMotorCells = adaptTable("adapt-motors", ADAPT_MOTOR_ROWS);
+
+function updateAdaptPanel(hand) {
+  const joints = hand ? adaptJoints(handAngles(hand), hand.joints) : null;
+  const motors = joints ? adaptMotors(joints) : null;
+  adaptJointCells.forEach(([cell, i]) => {
+    if (!joints) { cell.textContent = ""; return; }
+    const [lo, hi] = ADAPT_LIMITS[i], v = joints[i], out = v < lo - 1e-9 || v > hi + 1e-9;
+    cell.textContent = deg(v, i % 4 === 0 && i > 3);
+    cell.className = out ? "out" : "";
+    cell.title = out ? `outside the robot's range, ${deg(lo)} to ${deg(hi)}` : "";
+  });
+  adaptMotorCells.forEach(([cell, m]) => { cell.textContent = motors ? (motors[m] >= 0 ? "+" : "") + motors[m].toFixed(2) : ""; });
+}
 
 function updatePanels() {
   const age = (performance.now() - lastFrameAt) / 1000;
@@ -602,6 +825,9 @@ function updatePanels() {
 
   const hand = frame && frame[state.side];
   const side = state.side.toUpperCase();
+  $("human-panel").hidden = $("hand-wrist").hidden = $("hand-pinch").hidden = state.mode === "adapt";
+  $("adapt-panel").hidden = state.mode !== "adapt";
+  if (state.mode === "adapt") updateAdaptPanel(hand);
   $("hand-title").innerHTML = hand
     ? `${side} <span style="color: var(--ok)">● tracked</span>`
     : `${side} <span>○ not tracked</span>`;
@@ -635,7 +861,7 @@ function updatePanels() {
     body = `<p>With the headset: open <b>${page}</b> in the Quest browser and press Start.</p>` +
            "<p>Without it: run <code>metaquest-teleop-fake</code> in another terminal " +
            "(<code>--hands right</code> for the right hand only).</p>";
-  } else if (state.mode === "hand" && !hand) {
+  } else if (state.mode !== "room" && !hand) {
     title = `The ${state.side} hand is not tracked`;
     body = "<p>Show it to the headset, or pick the other hand at the top right.</p>";
   }
@@ -713,7 +939,7 @@ function syncControls() {
   });
   document.querySelectorAll("button[data-toggle]").forEach((b) => {
     b.classList.toggle("on", state[b.dataset.toggle]);
-    b.disabled = state.mode === "hand" && b.dataset.toggle !== "axes";
+    b.disabled = state.mode !== "room" && b.dataset.toggle !== "axes";
   });
   history.replaceState(null, "", `?${DEMO ? "demo&" : ""}mode=${state.mode}&hand=${state.side}`);
 }

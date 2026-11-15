@@ -45,6 +45,11 @@ with QuestHands() as quest:
             print(frame.right.wrist.position, frame.right.pinch)
 ```
 
+## ADAPT hand
+
+`metaquest_teleop.adapt` turns your hand into the ADAPT hand's 20 joint angles and 13 motor
+angles, and gives your wrist's pose: see [ADAPT Hand](https://vigno0405.github.io/MetaQuestTeleop/adapt.html).
+
 ## License
 
 MIT. Written by Gregorio Valenti and Lorenzo Vignoli.

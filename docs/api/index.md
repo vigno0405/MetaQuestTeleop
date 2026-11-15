@@ -34,6 +34,32 @@ Below, *method* is something you call with `()`, like `quest.wait()`; *property*
    :members:
 ```
 
+## ADAPT Hand: `metaquest_teleop.adapt`
+
+```{eval-rst}
+.. autofunction:: metaquest_teleop.adapt.joint_angles
+
+.. autofunction:: metaquest_teleop.adapt.motor_angles
+
+.. autofunction:: metaquest_teleop.adapt.wrist_pose
+
+.. autofunction:: metaquest_teleop.adapt.thumb_cmc
+
+.. autofunction:: metaquest_teleop.adapt.positions
+
+.. autodata:: metaquest_teleop.adapt.JOINTS
+   :no-value:
+
+.. autodata:: metaquest_teleop.adapt.MOTORS
+   :no-value:
+
+.. autodata:: metaquest_teleop.adapt.JOINT_LIMITS
+   :no-value:
+
+.. autodata:: metaquest_teleop.adapt.COUPLING
+   :no-value:
+```
+
 ## Names
 
 ```{eval-rst}
