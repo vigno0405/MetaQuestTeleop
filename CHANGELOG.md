@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (2026-11-12)
+## 0.2.0 (2026-11-15)
 
 - 3D view of the hands in a browser, at http://localhost:8012/view while the stream runs:
   a hand view and a room view, with the forearm, joint angles and pinch.
