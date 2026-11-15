@@ -5,15 +5,15 @@ hide-toc: true
 # ADAPT Hand
 
 `metaquest_teleop.adapt` turns your hand into the ADAPT hand's 20 joint angles and 13 motor
-angles, and gives the pose of your wrist. Its geometry, joint ranges and motor order are those of
-`virtualmodelcontrol.robots.adapt`.
+angles, within the robot's limits, and gives the pose of your wrist. Its geometry, joint ranges
+and motor order are those of `virtualmodelcontrol.robots.adapt`.
 
 ## Try it
 
 <iframe class="demo" src="_static/view.html?demo&mode=adapt&hand=right" title="Your hand next to the ADAPT hand it drives" loading="lazy"></iframe>
 
 Your hand is on the left; the ADAPT hand on the right is where its motors would put it. Amber
-angles are outside the robot's range. While `metaquest-teleop` runs, the same view is at
+angles are held at the robot's limit. While `metaquest-teleop` runs, the same view is at
 **http://localhost:8012/view?mode=adapt**.
 
 ## In Python
@@ -38,12 +38,25 @@ joint space, such as VMC, and `motors` as targets for a PID on the motors.
 
 | ADAPT joint | From your hand |
 |---|---|
-| each finger's MCP, PIP, DIP | your bend at the base, middle and tip joints, as they are: PIP and DIP can differ |
+| each finger's MCP, PIP, DIP | your bend at the base, middle and tip joints: PIP and DIP can differ |
 | each finger's spread | your sideways spread, with the opposite sign: the ADAPT hand counts towards the pinky |
 | thumb MCP, IP | your thumb's bend at its middle and tip joints |
-| thumb CMC1, CMC2 | the two angles that point the robot's thumb where your thumb's first bone points |
+| thumb CMC1 | the angle that points the robot's thumb where your thumb's first bone points |
+| thumb CMC2 | the same, measured from a relaxed thumb (below) |
 
-`adapt.joint_angles(hand, clip=True)` keeps every joint within its range, `adapt.JOINT_LIMITS`.
+## Limits
+
+Every joint is kept within its range, as the robot can go:
+
+| Joint | Range |
+|---|---|
+| thumb CMC1, MCP; each finger's MCP | 0 to 86° |
+| thumb CMC2 | −29 to 29° |
+| thumb IP; each finger's PIP and DIP | 0 to 69° |
+| spread: index / middle / ring and pinky | −17 to 0° / none / 0 to 17° |
+
+`adapt.JOINT_LIMITS` has them in radians. `joint_angles(hand, clip=False)` gives the angles
+before the limits.
 
 ## Motors: 13 for 20 joints
 
@@ -55,8 +68,14 @@ come closest to the joints:
 - one motor spreads the index, ring and pinky (the middle finger does not move): it takes the
   **best fit** of the three.
 
-It first keeps every joint within its range (`clip=False` skips that). `adapt.COUPLING @ motors`
-gives the joint angles the robot will actually reach.
+`adapt.COUPLING @ motors` gives the joint angles the robot will actually reach.
+
+## The thumb
+
+At zero, the ADAPT thumb sticks straight out sideways, about 65° further from the index than a
+relaxed thumb, beyond its CMC2 range of ±29°. So CMC2 is measured from a relaxed thumb: yours
+relaxed puts the robot's in the middle of its range, and moving yours moves it as much.
+`adapt.THUMB_REST` is that 65°; `joint_angles(hand, thumb_rest=0)` gives the exact angle.
 
 ## The wrist
 
@@ -68,9 +87,3 @@ with the axes of the ADAPT hand:
 - **−x** towards the thumb.
 
 A robot arm that puts the ADAPT hand's base there makes it face the way your hand does.
-
-## The thumb
-
-At zero, the ADAPT thumb sticks straight out sideways, much further from the index than a thumb
-at rest. Your thumb's first bone usually needs CMC2 beyond its ±29° range, so CMC2 often sits at
-its limit and shows in amber.

@@ -136,11 +136,11 @@
     <div class="caption">Bend at the base, middle and tip joints; spread sideways at the base.</div>
   </div>
   <div id="adapt-panel" hidden>
-    <h2>ADAPT joints, from your hand (°)</h2>
+    <h2>ADAPT joints, within their limits (°)</h2>
     <table class="angles mono" id="adapt-joints"></table>
     <h2>ADAPT motors (rad)</h2>
     <table class="angles mono" id="adapt-motors"></table>
-    <div class="caption">Amber: outside the robot's range.</div>
+    <div class="caption">Amber: held at the robot's limit (hover for yours).</div>
   </div>
 </div>
 
@@ -335,6 +335,8 @@ const ADAPT_FINGER_TRANSMISSIONS = {  // motor pulley, finger pulley, PIP cable 
 const ADAPT_THUMB_TRANSMISSION = { r_motor: 0.005, CMC1_pulley: 0.01346, CMC2_pulley: 0.00883,
                                    MCP_c: 0.00605, IP_c: 0.00577 };
 const ADAPT_SPREAD = { index: 1.0, middle: 0.0, ring: -1.0, pinky: -1.5 };
+const ADAPT_THUMB_REST = 65 * Math.PI / 180;  // CMC2 of a relaxed thumb, as adapt.THUMB_REST
+const adaptClip = (joints) => joints.map((v, i) => Math.min(Math.max(v, ADAPT_LIMITS[i][0]), ADAPT_LIMITS[i][1]));
 
 // Joint angles = ADAPT_COUPLING (20 x 13) · motor angles.
 const ADAPT_COUPLING = (() => {
@@ -386,19 +388,20 @@ function adaptThumbCmc(direction) {
 
 // The 20 ADAPT joint angles for your hand: `angles` (5 rows of base, spread, middle, tip) and
 // `joints` (25 rows of x, y, z, qx, qy, qz, qw), as metaquest_teleop.adapt.joint_angles.
-function adaptJoints(angles, joints) {
+function adaptJoints(angles, joints, clip = true, thumbRest = ADAPT_THUMB_REST) {
   const rw = quatToMat(joints[0].slice(3, 7));
   const d = sub(joints[2].slice(0, 3), joints[1].slice(0, 3));
   const local = [dot(column(rw, 0), d), dot(column(rw, 1), d), dot(column(rw, 2), d)];
-  const out = adaptThumbCmc([local[0], -local[1], -local[2]]).concat([angles[0][2], angles[0][3]]);
+  const [cmc1, cmc2] = adaptThumbCmc([local[0], -local[1], -local[2]]);
+  const out = [cmc1, cmc2 - thumbRest, angles[0][2], angles[0][3]];
   for (let f = 1; f < 5; f++) out.push(-angles[f][1], angles[f][0], angles[f][2], angles[f][3]);
-  return out;
+  return clip ? adaptClip(out) : out;
 }
 
 // The 13 motor angles: the least-squares fit through the coupling, as adapt.motor_angles. Each
 // motor drives its own joints, so the fit splits: PIP and DIP averaged, one spread for all.
 function adaptMotors(joints, clip = true) {
-  const j = clip ? joints.map((v, i) => Math.min(Math.max(v, ADAPT_LIMITS[i][0]), ADAPT_LIMITS[i][1])) : joints;
+  const j = clip ? adaptClip(joints) : joints;
   const C = ADAPT_COUPLING, q = new Array(13).fill(0);
   for (let m = 0; m < 13; m++) {
     let num = 0, den = 0;
@@ -789,14 +792,15 @@ const adaptJointCells = adaptTable("adapt-joints", ADAPT_JOINT_ROWS);
 const adaptMotorCells = adaptTable("adapt-motors", ADAPT_MOTOR_ROWS);
 
 function updateAdaptPanel(hand) {
-  const joints = hand ? adaptJoints(handAngles(hand), hand.joints) : null;
+  const raw = hand ? adaptJoints(handAngles(hand), hand.joints, false) : null;
+  const joints = raw ? adaptClip(raw) : null;
   const motors = joints ? adaptMotors(joints) : null;
   adaptJointCells.forEach(([cell, i]) => {
     if (!joints) { cell.textContent = ""; return; }
-    const [lo, hi] = ADAPT_LIMITS[i], v = joints[i], out = v < lo - 1e-9 || v > hi + 1e-9;
-    cell.textContent = deg(v, i % 4 === 0 && i > 3);
-    cell.className = out ? "out" : "";
-    cell.title = out ? `outside the robot's range, ${deg(lo)} to ${deg(hi)}` : "";
+    const [lo, hi] = ADAPT_LIMITS[i], held = Math.abs(raw[i] - joints[i]) > 1e-9, spread = i % 4 === 0 && i > 3;
+    cell.textContent = deg(joints[i], spread);
+    cell.className = held ? "out" : "";
+    cell.title = held ? `yours: ${deg(raw[i], spread)}; the robot's range: ${deg(lo)} to ${deg(hi)}` : "";
   });
   adaptMotorCells.forEach(([cell, m]) => { cell.textContent = motors ? (motors[m] >= 0 ? "+" : "") + motors[m].toFixed(2) : ""; });
 }

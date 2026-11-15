@@ -58,6 +58,9 @@ Below, *method* is something you call with `()`, like `quest.wait()`; *property*
 
 .. autodata:: metaquest_teleop.adapt.COUPLING
    :no-value:
+
+.. autodata:: metaquest_teleop.adapt.THUMB_REST
+   :no-value:
 ```
 
 ## Names

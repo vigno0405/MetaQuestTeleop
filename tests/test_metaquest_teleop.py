@@ -320,7 +320,7 @@ def test_adapt_joints_take_your_angles_and_the_motors_reduce_them():
 
     rng = np.random.default_rng(10)
     hand = synthetic_hand("right", _angles(rng), _pose(rng))
-    a, joints = hand.angles, adapt.joint_angles(hand)
+    a, joints = hand.angles, adapt.joint_angles(hand, clip=False, thumb_rest=0.0)  # the exact pairing
     for f in range(1, 5):  # fingers: spread with the ADAPT sign, then MCP, PIP and DIP as they are
         assert np.allclose(joints[4 * f:4 * f + 4], [-a[f, 1], a[f, 0], a[f, 2], a[f, 3]])
     assert np.allclose(joints[2:4], a[0, 2:4])
@@ -338,7 +338,14 @@ def test_adapt_joints_take_your_angles_and_the_motors_reduce_them():
     assert np.allclose(adapt.motor_angles(adapt.COUPLING @ q, clip=False), q)
     clipped = adapt.COUPLING @ adapt.motor_angles(np.full(20, 5.0))  # clip: every joint in range
     assert np.all(clipped <= np.array([adapt.JOINT_LIMITS[j][1] for j in adapt.JOINTS]) + 1e-9)
-    assert np.allclose(adapt.motor_angles(hand), adapt.motor_angles(joints))
+    assert np.allclose(adapt.motor_angles(hand), adapt.motor_angles(adapt.joint_angles(hand)))
+
+    # By default: CMC2 measured from a relaxed thumb, and every joint within its limits.
+    assert np.isclose(adapt.joint_angles(hand, clip=False)[1], joints[1] - adapt.THUMB_REST)
+    low, high = np.array([adapt.JOINT_LIMITS[j] for j in adapt.JOINTS]).T
+    held = adapt.joint_angles(hand)
+    assert np.all((low <= held) & (held <= high))
+    assert np.allclose(held, np.clip(adapt.joint_angles(hand, clip=False), low, high))
 
 
 def test_adapt_wrist_pose_has_the_axes_of_the_adapt_base():
@@ -363,17 +370,22 @@ def test_the_3d_views_adapt_hand_is_the_python_one(tmp_path):
     script.write_text(html.split("// math-begin")[1].split("// math-end")[0] + f"""
 const hands = {json.dumps([[h.angles.tolist(), np.hstack([h.positions, h.quaternions]).tolist()] for h in hands])};
 const joints = hands.map(([a, j]) => adaptJoints(a, j));
+const raw = hands.map(([a, j]) => adaptJoints(a, j, false));
 process.stdout.write(JSON.stringify({{
-  coupling: ADAPT_COUPLING, joints, motors: joints.map((j) => adaptMotors(j)),
-  free: joints.map((j) => adaptMotors(j, false)), shapes: joints.map(adaptPositions),
+  coupling: ADAPT_COUPLING, joints, raw, exact: hands.map(([a, j]) => adaptJoints(a, j, false, 0)),
+  motors: joints.map((j) => adaptMotors(j)), free: raw.map((j) => adaptMotors(j, false)),
+  shapes: raw.map(adaptPositions),
 }}));
 """, encoding="utf-8")
     out = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True, check=True).stdout)
 
     assert np.allclose(out["coupling"], adapt.COUPLING)
-    for hand, joints, motors, free, shape in zip(hands, out["joints"], out["motors"], out["free"], out["shapes"]):
-        assert np.allclose(joints, adapt.joint_angles(hand), atol=1e-12)
-        assert np.allclose(motors, adapt.motor_angles(hand), atol=1e-12)
-        assert np.allclose(free, adapt.motor_angles(hand, clip=False), atol=1e-12)
-        for digit, points in adapt.positions(adapt.joint_angles(hand)).items():
+    for k, hand in enumerate(hands):
+        assert np.allclose(out["joints"][k], adapt.joint_angles(hand), atol=1e-12)
+        assert np.allclose(out["raw"][k], adapt.joint_angles(hand, clip=False), atol=1e-12)
+        assert np.allclose(out["exact"][k], adapt.joint_angles(hand, clip=False, thumb_rest=0.0), atol=1e-12)
+        assert np.allclose(out["motors"][k], adapt.motor_angles(hand), atol=1e-12)
+        assert np.allclose(out["free"][k], adapt.motor_angles(hand, clip=False), atol=1e-12)
+        shape = out["shapes"][k]
+        for digit, points in adapt.positions(adapt.joint_angles(hand, clip=False)).items():
             assert np.allclose(shape[digit], points, atol=1e-12)

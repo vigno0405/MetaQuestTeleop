@@ -1,11 +1,13 @@
 # Changelog
 
-## 0.3.0
+## 0.3.0 (2026-11-15)
 
 - `metaquest_teleop.adapt`: your hand on the ADAPT hand. `joint_angles` gives its 20 joint
   angles, with PIP and DIP apart; `motor_angles` its 13 motor angles, the closest fit through
   the couplings (PIP and DIP averaged, one spread for all fingers); `wrist_pose` your wrist
-  with the ADAPT hand's axes. The geometry is that of `virtualmodelcontrol.robots.adapt`.
+  with the ADAPT hand's axes. Both keep every joint within the robot's limits, and the thumb's
+  CMC2 is measured from a relaxed thumb (`THUMB_REST`). The geometry is that of
+  `virtualmodelcontrol.robots.adapt`.
 - The 3D view's ADAPT mode: your hand next to the ADAPT hand its motors would make, with its
   joint and motor angles; also in the documentation, as a live demo.
 

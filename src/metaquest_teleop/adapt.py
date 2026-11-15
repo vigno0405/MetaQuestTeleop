@@ -2,7 +2,7 @@
 
     from metaquest_teleop import adapt
 
-    joints = adapt.joint_angles(hand)  # (20,) rad, in JOINTS order
+    joints = adapt.joint_angles(hand)  # (20,) rad, in JOINTS order, within JOINT_LIMITS
     motors = adapt.motor_angles(hand)  # (13,) rad, in MOTORS order: targets for a motor PID
     wrist = adapt.wrist_pose(hand)     # the wrist, with the ADAPT base frame's axes
 
@@ -45,6 +45,11 @@ JOINT_LIMITS = {
     "ring_spread": (0.0, 0.3), "ring_MCP": (0.0, 1.5), "ring_PIP": (0.0, 1.2), "ring_DIP": (0.0, 1.2),
     "pinky_spread": (0.0, 0.3), "pinky_MCP": (0.0, 1.5), "pinky_PIP": (0.0, 1.2), "pinky_DIP": (0.0, 1.2),
 }  # fmt: skip
+
+#: The CMC2 angle of a relaxed thumb, 65° in radians. At zero the ADAPT thumb sticks out sideways,
+#: well beyond a relaxed thumb, and its CMC2 range (±29°) cannot reach where yours is; so CMC2 is
+#: measured from a relaxed thumb: yours relaxed puts the robot's in the middle of its range.
+THUMB_REST = float(np.radians(65.0))
 
 DIGITS = ("thumb", "index", "middle", "ring", "pinky")
 
@@ -175,18 +180,19 @@ def thumb_cmc(direction) -> tuple[float, float]:
     return best
 
 
-def joint_angles(hand: Hand, clip: bool = False) -> np.ndarray:
+def joint_angles(hand: Hand, clip: bool = True, thumb_rest: float = THUMB_REST) -> np.ndarray:
     """(20,) the ADAPT joint angles for your hand, radians, in :data:`JOINTS` order.
 
     Each finger's MCP, PIP and DIP take your angles as they are, so PIP and DIP may differ; its
     spread is your sideways spread with the sign of the ADAPT hand (positive towards the pinky).
     The thumb's MCP and IP take your angles; CMC1 and CMC2 point the thumb's metacarpal where
-    yours points (:func:`thumb_cmc`). ``clip`` keeps each joint within :data:`JOINT_LIMITS`.
+    yours points (:func:`thumb_cmc`), CMC2 less ``thumb_rest`` (:data:`THUMB_REST`; 0 for the
+    exact angle). ``clip`` keeps each joint within :data:`JOINT_LIMITS`, as the robot can go.
     """
     a = hand.angles
     metacarpal = hand.rotations[0].T @ (hand.positions[2] - hand.positions[1])  # in your wrist's frame
     cmc1, cmc2 = thumb_cmc(_FROM_WEBXR @ metacarpal)
-    out = [cmc1, cmc2, a[0, 2], a[0, 3]]
+    out = [cmc1, cmc2 - thumb_rest, a[0, 2], a[0, 3]]
     for f in range(1, 5):
         out += [-a[f, 1], a[f, 0], a[f, 2], a[f, 3]]
     out = np.array(out)
@@ -201,7 +207,7 @@ def motor_angles(source, clip: bool = True) -> np.ndarray:
     takes the mean of its PIP and DIP angles, and the spread motor the best fit of the index,
     ring and pinky spreads. ``clip`` first keeps each joint within :data:`JOINT_LIMITS`.
     """
-    joints = joint_angles(source) if isinstance(source, Hand) else np.asarray(source, dtype=float)
+    joints = joint_angles(source, clip) if isinstance(source, Hand) else np.asarray(source, dtype=float)
     if clip:
         joints = np.clip(joints, _LOW, _HIGH)
     return np.linalg.lstsq(COUPLING, joints, rcond=None)[0]
