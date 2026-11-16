@@ -115,6 +115,8 @@ class QuestHands:
         self._latest: Frame | None = None
         self._cond = threading.Condition()
         self._callbacks: list[Callable[[Frame], None]] = []
+        self._raw_callbacks: list[Callable[[Frame], None]] = []
+        self.teleop = None  # a Teleop, once one drives a robot from this stream
         self._arrivals: collections.deque[tuple[float, bool]] = collections.deque(maxlen=2048)
         self._last_hands = b""
         self._clients: set[web.WebSocketResponse] = set()
@@ -193,12 +195,13 @@ class QuestHands:
             self._cond.wait_for(lambda: self.frames > seen or self._stopping.is_set(), timeout)
             return self._latest if self.frames > seen else None
 
-    def on_frame(self, callback: Callable[[Frame], None]) -> None:
+    def on_frame(self, callback: Callable[[Frame], None], raw: bool = False) -> None:
         """Call ``callback(frame)`` for every frame.
 
-        It runs in the background thread that receives the frames, so keep it fast.
+        It runs in the background thread that receives the frames, so keep it fast. ``raw``
+        gives it every frame with both hands, whichever ``hands`` keeps (for gestures).
         """
-        self._callbacks.append(callback)
+        (self._raw_callbacks if raw else self._callbacks).append(callback)
 
     def rates(self) -> dict:
         """Statistics of the stream, as a dict.
@@ -314,6 +317,7 @@ class QuestHands:
                 "usb_ok": self.usb_ok, "usb": self.usb, "frames": self.frames,
                 "hz": rates["hz"], "changed_hz": rates["changed_hz"],
                 "hands": self.hands,
+                "teleop": None if self.teleop is None else self.teleop.command().reason or "moving",
                 **{key: self.headset.get(key) for key in ("session", "mode", "fps", "space")}}
 
     # -- frames from the headset ------------------------------------------------------------- #
@@ -324,6 +328,7 @@ class QuestHands:
         except ValueError as exc:
             self._event(f"bad frame: {exc}")
             return
+        self._call(self._raw_callbacks, frame)  # both hands, for gestures
         sides, part = _KEPT[self.hands]
         frame = dataclasses.replace(frame, **{s: None for s in ("left", "right") if s not in sides})
         hands = data[part]
@@ -334,16 +339,19 @@ class QuestHands:
             self.frames += 1
             self._arrivals.append((time.perf_counter(), changed))
             self._cond.notify_all()
-        for callback in list(self._callbacks):
-            try:
-                callback(frame)
-            except Exception as exc:  # noqa: BLE001 -- a user callback must not stop the stream
-                self._event(f"on_frame callback failed: {exc!r}")
+        self._call(self._callbacks, frame)
         if self._udp is not None:
             try:
                 self._udp.sendto(json.dumps(frame.to_dict(), separators=(",", ":")).encode(), self.udp)
             except OSError as exc:
                 self._event(f"UDP send failed: {exc}")
+
+    def _call(self, callbacks: list[Callable[[Frame], None]], frame: Frame) -> None:
+        for callback in list(callbacks):
+            try:
+                callback(frame)
+            except Exception as exc:  # noqa: BLE001 -- a user callback must not stop the stream
+                self._event(f"on_frame callback failed: {exc!r}")
 
     def _message(self, text: str) -> None:
         try:

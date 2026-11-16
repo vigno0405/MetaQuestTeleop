@@ -41,44 +41,8 @@ frame.received                  # time.time() when the frame arrived
 
 ## Control a robot
 
-The robot follows how the hand moves, not where it is, so it never jumps. When the hand
-disappears or the frames stop, it holds still. The pinch drives the gripper.
-
-```python
-import time
-
-import numpy as np
-from metaquest_teleop import QuestHands
-
-# The headset's axes (x right, y up, -z forward) in the robot's (x forward, y left, z up).
-M = np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]])
-
-
-def send_to_robot(target, gripper):
-    """Your robot: go to `target` (m, in its base frame); gripper from 0 closed to 1 open."""
-
-
-target = np.array([0.4, 0.0, 0.3])  # the robot's target, m
-anchor = None                       # the wrist and the target when the hand appeared
-
-with QuestHands() as quest:
-    while True:
-        frame = quest.latest()
-        fresh = frame is not None and time.time() - frame.received < 0.1
-        hand = frame.right if fresh else None
-        if hand is None:
-            anchor = None  # no hand, or no frames for 0.1 s: hold still
-        else:
-            if anchor is None:
-                anchor = (hand.wrist.position, target)
-            wrist0, target0 = anchor
-            target = target0 + M @ (hand.wrist.position - wrist0)  # follow the hand's motion
-            gripper = np.interp(hand.pinch, [0.015, 0.08], [0.0, 1.0])
-            send_to_robot(target, gripper)
-        time.sleep(0.01)  # about 100 Hz
-```
-
-Orientation works the same way, with `hand.wrist.rotation`.
+[Teleoperation](teleop.md) does it for you: your right hand drives the robot, a pinch of your
+left hand pauses it, and it holds when a hand or the frames go missing.
 
 ## Other programs: UDP
 

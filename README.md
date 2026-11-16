@@ -45,6 +45,13 @@ with QuestHands() as quest:
             print(frame.right.wrist.position, frame.right.pinch)
 ```
 
+## Teleoperation and ROS 2
+
+Your right hand drives the robot; pinch your left hand to pause it, and it holds when a hand is
+not seen. `metaquest-teleop` publishes it all on ROS 2 (Humble and Jazzy) when it finds ROS:
+see [Teleoperation](https://vigno0405.github.io/MetaQuestTeleop/teleop.html) and
+[ROS 2](https://vigno0405.github.io/MetaQuestTeleop/ros.html).
+
 ## ADAPT hand
 
 `metaquest_teleop.adapt` turns your hand into the ADAPT hand's 20 joint angles and 13 motor

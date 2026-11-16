@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import threading
+import time
 import urllib.request
 from importlib.resources import files
 
@@ -425,3 +426,195 @@ def test_a_frame_rate_change_keeps_the_session_started():
         info, events = asyncio.run(headset())
     assert info["session"] == "started" and info["mode"] == "immersive-ar" and info["fps"] == 120
     assert "streaming started" in events and "frame rate now 120 Hz" in events
+
+
+def test_print_joints_shows_the_hands_angles_and_the_adapt_ones():
+    from metaquest_teleop import adapt
+    from metaquest_teleop.cli import joints_header, joints_line
+
+    hand = synthetic_hand("right", _angles(np.random.default_rng(13)), _pose(np.random.default_rng(14)))
+    line = joints_line("right", hand, "hand")
+    numbers = [float(w) for w in line.replace("|", " ").split() if w.lstrip("+-").isdigit()]
+    assert line.startswith("right") and "index" in line
+    assert np.allclose(numbers, np.round(np.degrees(hand.angles.ravel())))
+    adapt_line = joints_line("right", hand, "adapt")
+    numbers = [float(w) for w in adapt_line.replace("|", " ").split() if w.lstrip("+-").isdigit()]
+    assert np.allclose(numbers, np.round(np.degrees(adapt.joint_angles(hand))))
+    assert "not tracked" in joints_line("right", None, "hand")
+    assert "CMC1" in joints_header("adapt") and "base spread middle tip" in joints_header("hand")
+
+
+def test_ros_topics_carry_the_right_hand_and_the_adapt_hand():
+    rclpy = pytest.importorskip("rclpy")
+    from geometry_msgs.msg import PoseArray, PoseStamped
+    from sensor_msgs.msg import JointState
+    from std_msgs.msg import Bool, Float64, String
+
+    from metaquest_teleop import adapt
+    from metaquest_teleop.ros import FRAME_ID, RosPublisher
+
+    topics = {"/metaquest/right/joint_states": JointState, "/metaquest/right/wrist": PoseStamped,
+              "/metaquest/right/joints": PoseArray, "/metaquest/right/pinch": Float64,
+              "/metaquest/adapt/joint_states": JointState, "/metaquest/adapt/motors": JointState,
+              "/metaquest/adapt/wrist": PoseStamped, "/metaquest/teleop/hold": Bool,
+              "/metaquest/teleop/state": String, "/metaquest/teleop/wrist": PoseStamped,
+              "/metaquest/left/joint_states": JointState}
+    port = _free_port()
+    rclpy.init()
+    try:
+        listener = rclpy.create_node("metaquest_test_listener")
+        got, first = {}, {}
+        def keep(msg, topic):  # the latest message of each topic, and the first
+            first.setdefault(topic, msg)
+            got[topic] = msg
+        for topic, kind in topics.items():
+            listener.create_subscription(kind, topic, lambda msg, t=topic: keep(msg, t), 10)
+        with QuestHands(port, adb=False) as quest:  # the right hand only, by default
+            from metaquest_teleop import Teleop
+            ros = RosPublisher(quest, teleop=Teleop(quest))
+            headset = threading.Thread(target=lambda: asyncio.run(
+                stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=3.0, hands=("left", "right"))))
+            headset.start()
+            deadline = time.monotonic() + 10.0
+            while len(got) < 10 and time.monotonic() < deadline:
+                rclpy.spin_once(listener, timeout_sec=0.05)
+            frame = quest.latest()
+            ros.close()
+            headset.join(5.0)
+        listener.destroy_node()
+    finally:
+        rclpy.shutdown()
+
+    assert "/metaquest/left/joint_states" not in got  # the left hand is not kept
+    joints = got["/metaquest/right/joint_states"]
+    assert list(joints.name) == list(ANGLE_NAMES) and len(joints.position) == 20
+    assert got["/metaquest/right/wrist"].header.frame_id == FRAME_ID
+    assert len(got["/metaquest/right/joints"].poses) == 25
+    assert 0.0 < got["/metaquest/right/pinch"].data < 0.3
+    adapt_joints = got["/metaquest/adapt/joint_states"]
+    assert list(adapt_joints.name) == list(adapt.JOINTS)
+    low, high = np.array([adapt.JOINT_LIMITS[j] for j in adapt.JOINTS]).T
+    assert np.all((low - 1e-9 <= adapt_joints.position) & (np.array(adapt_joints.position) <= high + 1e-9))
+    motors = got["/metaquest/adapt/motors"]
+    assert list(motors.name) == list(adapt.MOTORS)
+    assert np.allclose(motors.position, adapt.motor_angles(np.array(adapt_joints.position)))
+    assert frame.right is not None and frame.left is None
+    assert first["/metaquest/teleop/hold"].data is True  # before the first frame: hold
+    assert first["/metaquest/teleop/state"].data == "no frames yet"
+    assert got["/metaquest/teleop/hold"].data is False and got["/metaquest/teleop/state"].data == "moving"
+    assert got["/metaquest/teleop/wrist"].header.frame_id == FRAME_ID
+
+
+# -- teleoperation: the right hand drives, the left hand pauses ---------------------------------- #
+
+def _yaw(angle):
+    return np.array([0.0, np.sin(angle / 2), 0.0, np.cos(angle / 2)])
+
+
+def _teleop_frame(t, right_at=None, right_yaw=0.0, left_pinch=None, angles=None):
+    """A frame at time t: the right hand at `right_at` (None: not seen), the left with that pinch."""
+    from metaquest_teleop.hands import Frame
+
+    right = None if right_at is None else synthetic_hand(
+        "right", np.zeros((5, 4)) if angles is None else angles, Pose(np.asarray(right_at, float), _yaw(right_yaw)))
+    left = None
+    if left_pinch is not None:
+        left = synthetic_hand("left", np.zeros((5, 4)), Pose(np.array([-0.2, 1.1, -0.4]), _yaw(0.0)))
+        positions = left.positions.copy()
+        positions[9] = positions[4] + np.array([left_pinch, 0.0, 0.0])  # index tip that far from the thumb
+        left = Hand("left", positions, left.quaternions)
+    return Frame(int(t * 100), t, 1000.0 + t, None, left, right)
+
+
+def test_the_left_pinch_holds_the_robot_and_releasing_it_resumes_without_a_jump():
+    from metaquest_teleop import Teleop, adapt
+
+    teleop = Teleop(QuestHands())
+    assert teleop.command().hold and teleop.command().reason == "no frames yet"
+
+    start = teleop.update(_teleop_frame(0.0, [0.2, 1.1, -0.4], left_pinch=0.08))
+    assert not start.hold and start.reason == ""
+    assert np.allclose(start.wrist.position, [0.2, 1.1, -0.4])  # it starts at your wrist
+    assert np.allclose(start.wrist.rotation, adapt.wrist_pose(_teleop_frame(0.0, [0.2, 1.1, -0.4], left_pinch=0.08).right).rotation)
+    moved = teleop.update(_teleop_frame(0.1, [0.3, 1.1, -0.4], left_pinch=0.08))
+    assert np.allclose(moved.wrist.position, [0.3, 1.1, -0.4])  # and follows it
+
+    bent = np.full((5, 4), 0.5)
+    held = teleop.update(_teleop_frame(0.2, [0.5, 1.2, -0.4], left_pinch=0.01, angles=bent))
+    assert held.hold and held.reason == "left hand pinching"
+    assert np.allclose(held.wrist.position, moved.wrist.position)  # the robot stays
+    assert np.allclose(held.joints, moved.joints) and np.allclose(held.motors, moved.motors)
+    still = teleop.update(_teleop_frame(0.3, [0.6, 1.2, -0.4], left_pinch=0.03))  # half open: still pinching
+    assert still.hold and np.allclose(still.wrist.position, moved.wrist.position)
+
+    released = teleop.update(_teleop_frame(0.4, [0.6, 1.2, -0.4], left_pinch=0.06, angles=bent))
+    assert not released.hold
+    assert np.allclose(released.wrist.position, moved.wrist.position)  # no jump on release
+    assert np.allclose(released.joints, adapt.joint_angles(_teleop_frame(0.4, [0.6, 1.2, -0.4], angles=bent).right))
+    again = teleop.update(_teleop_frame(0.5, [0.65, 1.2, -0.45], right_yaw=0.3, left_pinch=0.06))
+    assert np.allclose(again.wrist.position, moved.wrist.position + [0.05, 0.0, -0.05])  # it moves as you move
+    turn = again.wrist.rotation @ released.wrist.rotation.T
+    assert np.isclose(np.arctan2(turn[0, 2], turn[2, 2]), 0.3)  # and turns as you turn
+
+    assert teleop.update(_teleop_frame(0.6, [0.65, 1.2, -0.45])).reason == "left hand not seen"
+    assert teleop.update(_teleop_frame(0.7, None, left_pinch=0.08)).reason == "right hand not seen"
+    last = teleop.update(_teleop_frame(0.8, [0.65, 1.2, -0.45], left_pinch=0.08))
+    assert not teleop.command(now=last.received + 0.05).hold
+    assert teleop.command(now=last.received + 0.5).reason == "no frames"  # frames stopped
+
+
+def test_the_teleop_sees_the_left_hand_that_the_stream_leaves_out():
+    from metaquest_teleop import Teleop
+
+    port = _free_port()
+    with QuestHands(port, adb=False) as quest:  # the right hand only
+        teleop = Teleop(quest)
+        headset = threading.Thread(target=lambda: asyncio.run(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=0.8)))
+        headset.start()
+        frame = quest.wait(timeout=3.0)
+        time.sleep(0.2)
+        command = teleop.command()
+        headset.join(5.0)
+    assert frame.left is None and frame.right is not None
+    assert not command.hold and command.motors is not None  # the fake left hand never pinches
+
+
+def test_the_teleop_without_the_adapt_hand_gives_your_own_angles_and_wrist():
+    from metaquest_teleop import Teleop
+
+    teleop = Teleop(QuestHands(), adapt=False)
+    frame = _teleop_frame(0.0, [0.2, 1.1, -0.4], right_yaw=0.4, left_pinch=0.08, angles=np.full((5, 4), 0.3))
+    command = teleop.update(frame)
+    assert not command.hold and command.motors is None
+    assert np.allclose(command.joints, frame.right.angles.ravel())
+    assert np.allclose(command.wrist.rotation, frame.right.wrist.rotation)
+
+
+@pytest.mark.parametrize("stop", ["SIGINT", "SIGTERM"])
+def test_the_command_stops_on_ctrl_c_and_on_request_with_ros(stop):
+    pytest.importorskip("rclpy")
+    import signal
+    import sys
+
+    port = _free_port()
+    command = subprocess.Popen([sys.executable, "-m", "metaquest_teleop", "--no-adb", "--port", str(port),
+                                "--plain", "--ros"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    guard = threading.Timer(60.0, command.kill)  # never hang the tests
+    guard.start()
+    try:
+        seen = []
+        for line in command.stdout:  # until it runs: importing ROS the first time takes a while
+            seen.append(line)
+            if "publishing on ROS 2" in line:
+                break
+        time.sleep(0.5)
+        command.send_signal(getattr(signal, stop))
+        rest, _ = command.communicate(timeout=10)  # it must end, not hang
+        output = "".join(seen) + rest
+    finally:
+        guard.cancel()
+        if command.poll() is None:
+            command.kill()
+    assert "publishing on ROS 2" in output
+    if stop == "SIGINT":
+        assert command.returncode == 0 and "Stopped after" in output

@@ -104,6 +104,7 @@
   <div class="line" id="usb-line"><i class="dot" id="d-usb"></i><b>USB</b><span id="t-usb"></span></div>
   <div class="line"><i class="dot" id="d-headset"></i><b>headset</b><span id="t-headset"></span></div>
   <div class="line"><i class="dot" id="d-stream"></i><b>stream</b><span id="t-stream">no frames yet</span></div>
+  <div class="line" id="teleop-line" style="display: none"><i class="dot" id="d-teleop"></i><b>robot</b><span id="t-teleop"></span></div>
 </div>
 
 <div class="panel" id="controls">
@@ -825,6 +826,11 @@ function updatePanels() {
     if (!everFrame) setLine("stream", "", "no frames yet");
     else if (!fresh()) setLine("stream", "warn", `no frames for ${age.toFixed(1)} s`);
     else setLine("stream", "ok", status ? `${status.hz} frames/s` : "receiving");
+
+    const teleop = status && status.teleop;
+    $("teleop-line").style.display = teleop ? "" : "none";
+    if (teleop) setLine("teleop", teleop === "moving" ? "ok" : teleop.includes("pinching") ? "warn" : "bad",
+                        teleop === "moving" ? "moving" : `holding: ${teleop}`);
   }
 
   const hand = frame && frame[state.side];

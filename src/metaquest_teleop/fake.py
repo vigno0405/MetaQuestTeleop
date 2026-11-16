@@ -2,7 +2,7 @@
 
     metaquest-teleop-fake                    # streams to the default port at 90 Hz until Ctrl-C
     metaquest-teleop-fake --hz 120 --seconds 10
-    metaquest-teleop-fake --hands both       # both hands (the default is the right one only)
+    metaquest-teleop-fake --hands right      # the right hand only: the robot holds (left not seen)
     python -m metaquest_teleop.fake          # the same
 """
 
@@ -92,7 +92,7 @@ def pose_at(t: float, side: str) -> tuple[np.ndarray, Pose]:
 
 
 async def stream(url: str, hz: float = 90.0, seconds: float | None = None,
-                 hands: tuple[str, ...] = ("right",)) -> int:
+                 hands: tuple[str, ...] = ("left", "right")) -> int:
     """Send synthetic frames to a running server; returns how many were sent.
 
     ``hands`` are the sides to send; the others are reported as not tracked.
@@ -121,8 +121,8 @@ def main() -> None:
                         help=f"port of the running metaquest-teleop (default {DEFAULT_PORT})")
     parser.add_argument("--hz", type=float, default=90.0, help="frames per second")
     parser.add_argument("--seconds", type=float, default=None, help="stop after this long")
-    parser.add_argument("--hands", choices=("right", "left", "both"), default="right",
-                        help="which hands to send (default right)")
+    parser.add_argument("--hands", choices=("both", "right", "left"), default="both",
+                        help="which hands to send (default both: the right drives, the left pauses)")
     args = parser.parse_args()
     hands = ("left", "right") if args.hands == "both" else (args.hands,)
     url = f"ws://localhost:{args.port}/ws"

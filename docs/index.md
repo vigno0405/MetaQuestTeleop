@@ -56,6 +56,8 @@ troubleshooting
 :caption: Using it
 
 python
+teleop
+ros
 data
 ```
 

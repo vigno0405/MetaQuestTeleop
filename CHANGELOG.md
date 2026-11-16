@@ -1,7 +1,18 @@
 # Changelog
 
-## 0.4.1 (2026-11-16)
+## 0.5.0 (2026-11-16)
 
+- Teleoperation (`Teleop`): your right hand drives the robot; pinch your left hand to hold it
+  still and move your right hand freely, release to go on from where it stopped. It holds when
+  either hand is not seen or frames stop. The dashboard and the 3D view show it.
+- ROS 2 (Humble and Jazzy): `metaquest-teleop` publishes the hand, the ADAPT hand and the
+  teleoperation on `/metaquest/...` topics, with standard messages, whenever it finds ROS 2;
+  `--ros` requires it, `--no-ros` turns it off. `metaquest_teleop.ros.RosPublisher` from Python.
+- `--no-adapt` (`Teleop(quest, adapt=False)`): no ADAPT hand; the teleoperation gives your own
+  joint angles and wrist, for any robot.
+- `metaquest-teleop --print_joints` prints the joint angles, `--print_joints adapt` the ADAPT
+  hand's, with the robot's state.
+- `metaquest-teleop-fake` sends both hands again by default: the left one gives the gestures.
 - Fix a black screen in the headset after Start: the page waited for the higher frame rate
   before drawing its first frame, and on the Quest that change only happens once frames are
   drawn. It now draws first and asks for the frame rate without waiting.

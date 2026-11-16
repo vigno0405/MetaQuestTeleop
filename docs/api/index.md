@@ -13,6 +13,16 @@ Below, *method* is something you call with `()`, like `quest.wait()`; *property*
    :members: wait, latest, on_frame, start, stop, url, view_url, connected, rates
 ```
 
+## Teleop: one hand drives, the other pauses
+
+```{eval-rst}
+.. autoclass:: metaquest_teleop.Teleop
+   :members: command, update
+
+.. autoclass:: metaquest_teleop.Command
+   :members:
+```
+
 ## Frame: one moment
 
 ```{eval-rst}

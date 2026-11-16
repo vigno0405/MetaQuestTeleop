@@ -40,3 +40,26 @@ jobs:
       - run: python -m pip install build twine
       - run: python -m build
       - run: python -m twine check --strict dist/*
+
+  ros:
+    name: ROS 2 ${{ matrix.distro }}
+    runs-on: ubuntu-latest
+    container: ros:${{ matrix.distro }}-ros-base
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [humble, jazzy]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - run: apt-get update && apt-get install -y --no-install-recommends python3-venv python3-pip
+      - name: Test with the Python and the ROS 2 of the distribution
+        run: |
+          source /opt/ros/${{ matrix.distro }}/setup.bash
+          python3 -m venv --system-site-packages /tmp/venv
+          /tmp/venv/bin/pip install --upgrade pip
+          /tmp/venv/bin/pip install ".[test]"
+          /tmp/venv/bin/python -c "import rclpy, sensor_msgs.msg, geometry_msgs.msg, std_msgs.msg"
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /tmp/venv/bin/python -m pytest -v -rs tests

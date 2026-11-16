@@ -69,6 +69,15 @@ def _status(quest: QuestHands) -> Panel:
         stream = Text.assemble((f"{rates['hz']} frames/s", "bold green"),
                                (f"   {quest.frames:,} received", "dim"))
     grid.add_row("stream", stream)
+    if quest.teleop is not None:
+        command = quest.teleop.command()
+        if not command.hold:
+            robot = Text.assemble(_dot(True), f"moving with your {quest.teleop.drive} hand",
+                                  (f"   pinch your {quest.teleop.gesture} hand to hold", "dim"))
+        else:
+            robot = Text.assemble(_dot(None if "pinching" in command.reason else False),
+                                  f"holding: {command.reason}")
+        grid.add_row("robot", robot)
     if quest.udp is not None:
         grid.add_row("UDP", f"every frame as JSON to {quest.udp[0]}:{quest.udp[1]}")
     for stamp, text in list(quest.events)[-3:]:
