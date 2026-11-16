@@ -236,7 +236,7 @@ _OFFSETS = np.array([[o for o, _ in DIGIT_JOINTS[d]] for d in DIGITS], dtype=flo
 _BASES = PALM_ORIGIN + np.array([DIGIT_BASES[d] for d in DIGITS], dtype=float)  # (5, 3)
 _TIPS = np.array([TIP_OFFSETS[d] for d in DIGITS], dtype=float)  # (5, 3)
 _BEFORE = np.array([[j <= i - 2 for j in range(4)] for i in (3, 4, 5)], dtype=float)  # joint j moves point i
-_YOUR_POINTS = [[2, 3, 4], [7, 8, 9], [12, 13, 14], [17, 18, 19], [22, 23, 24]]  # yours <-> ADAPT points 3, 4, 5
+_YOUR_POINTS = np.array([[2, 3, 4], [7, 8, 9], [12, 13, 14], [17, 18, 19], [22, 23, 24]])  # yours <-> ADAPT points 3, 4, 5
 _YOUR_KNUCKLES, _YOUR_TIPS = [6, 11, 16, 21], [9, 14, 19, 24]
 
 
