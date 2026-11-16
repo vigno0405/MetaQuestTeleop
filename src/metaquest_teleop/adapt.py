@@ -146,6 +146,20 @@ _FROM_WEBXR = np.diag([1.0, -1.0, -1.0])
 
 _LOW = np.array([JOINT_LIMITS[j][0] for j in JOINTS])
 _HIGH = np.array([JOINT_LIMITS[j][1] for j in JOINTS])
+_FIT = np.linalg.pinv(COUPLING)  # the least-squares motor angles for 20 joint angles
+
+
+def _motor_ranges() -> tuple[np.ndarray, np.ndarray]:
+    """For each motor, the angles that keep every joint it turns within JOINT_LIMITS."""
+    low, high = np.full(13, -np.inf), np.full(13, np.inf)
+    for j, row in enumerate(COUPLING):
+        for m in np.flatnonzero(row):
+            a, b = sorted((_LOW[j] / row[m], _HIGH[j] / row[m]))
+            low[m], high[m] = max(low[m], a), min(high[m], b)
+    return low, high
+
+
+_MOTOR_LOW, _MOTOR_HIGH = _motor_ranges()
 
 
 def _rotation(axis, angle: float) -> np.ndarray:
@@ -189,37 +203,55 @@ def thumb_cmc(direction) -> tuple[float, float]:
     return best
 
 
-def joint_angles(hand: Hand, clip: bool = True, thumb_rest: float = THUMB_REST) -> np.ndarray:
-    """(20,) the ADAPT joint angles for your hand, radians, in :data:`JOINTS` order.
-
-    Each finger's MCP, PIP and DIP take your angles as they are, so PIP and DIP may differ; its
-    spread is your sideways spread with the sign of the ADAPT hand (positive towards the pinky).
-    The thumb's MCP and IP take your angles; CMC1 and CMC2 point the thumb's metacarpal where
-    yours points (:func:`thumb_cmc`), CMC2 less ``thumb_rest`` (:data:`THUMB_REST`; 0 for the
-    exact angle). ``clip`` keeps each joint within :data:`JOINT_LIMITS`, as the robot can go.
-    """
+def _wanted(hand: Hand, thumb_rest: float) -> np.ndarray:
+    """(20,) your angle for each ADAPT joint, one by one, before its couplings and limits."""
     a = hand.angles
     metacarpal = hand.rotations[0].T @ (hand.positions[2] - hand.positions[1])  # in your wrist's frame
     cmc1, cmc2 = thumb_cmc(_FROM_WEBXR @ metacarpal)
     out = [cmc1, cmc2 - thumb_rest, a[0, 2], a[0, 3]]
     for f in range(1, 5):
         out += [-a[f, 1], a[f, 0], a[f, 2], a[f, 3]]
-    out = np.array(out)
-    return np.clip(out, _LOW, _HIGH) if clip else out
+    return np.array(out)
+
+
+def _fit(joints: np.ndarray, clip: bool) -> np.ndarray:
+    motors = _FIT @ joints
+    return np.clip(motors, _MOTOR_LOW, _MOTOR_HIGH) if clip else motors
+
+
+def joint_angles(hand: Hand, clip: bool = True, thumb_rest: float = THUMB_REST,
+                 coupled: bool = True) -> np.ndarray:
+    """(20,) the ADAPT joint angles for your hand, radians, in :data:`JOINTS` order: a pose it can take.
+
+    Each joint first takes your angle: a finger's MCP, PIP and DIP your bends at its base, middle
+    and tip, its spread your sideways spread with the sign of the ADAPT hand (positive towards the
+    pinky); the thumb's MCP and IP your angles, and CMC1 and CMC2 point its metacarpal where yours
+    points (:func:`thumb_cmc`), CMC2 less ``thumb_rest`` (:data:`THUMB_REST`; 0 for the exact
+    angle).
+
+    The ADAPT hand's joints are coupled, as in ``virtualmodelcontrol``: a finger's DIP mimics its
+    PIP (one motor turns both, by the same angle), and one motor spreads the index, ring and pinky
+    together. So these are the angles of the closest pose it can take, ``COUPLING @
+    motor_angles(...)``: a finger's PIP and DIP both the mean of yours, which keeps your fingertip
+    pointing where it points, and the spreads the best fit of yours. ``coupled=False`` gives your
+    angles one by one instead. ``clip`` keeps every joint within :data:`JOINT_LIMITS`.
+    """
+    wanted = _wanted(hand, thumb_rest)
+    joints = COUPLING @ _fit(wanted, clip) if coupled else wanted
+    return np.clip(joints, _LOW, _HIGH) if clip else joints  # coupled: only rounding to take off
 
 
 def motor_angles(source, clip: bool = True) -> np.ndarray:
     """(13,) the ADAPT motor angles, radians, in :data:`MOTORS` order: targets for a motor PID.
 
-    ``source`` is a :class:`~metaquest_teleop.Hand` or 20 joint angles. 13 motors cannot set 20
-    joints, so this is the least-squares fit through :data:`COUPLING`: a finger's PIP motor
-    takes the mean of its PIP and DIP angles, and the spread motor the best fit of the index,
-    ring and pinky spreads. ``clip`` first keeps each joint within :data:`JOINT_LIMITS`.
+    ``source`` is a :class:`~metaquest_teleop.Hand` or 20 joint angles. 13 motors cannot set any
+    20 joints, so this is the least-squares fit through :data:`COUPLING`: a finger's PIP motor
+    takes the mean of its PIP and DIP, and the spread motor the best fit of the index, ring and
+    pinky spreads. For :func:`joint_angles`, a pose the hand can take, it is exact. ``clip`` keeps
+    each motor where every joint it turns stays within :data:`JOINT_LIMITS`.
     """
-    joints = joint_angles(source, clip) if isinstance(source, Hand) else np.asarray(source, dtype=float)
-    if clip:
-        joints = np.clip(joints, _LOW, _HIGH)
-    return np.linalg.lstsq(COUPLING, joints, rcond=None)[0]
+    joints = _wanted(source, THUMB_REST) if isinstance(source, Hand) else np.asarray(source, dtype=float)
+    return _fit(joints, clip)
 
 
 def wrist_pose(hand: Hand) -> Pose:

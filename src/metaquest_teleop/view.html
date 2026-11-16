@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hands in 3D · metaquest-teleop</title>
 <style>
+  [hidden] { display: none !important; }  /* also where a rule sets display */
   :root {
     color-scheme: dark;
     --bg: #0d1a2d; --panel: rgba(8, 18, 31, 0.86); --edge: rgba(138, 180, 248, 0.22);
@@ -113,7 +114,7 @@
     <button data-value="hand" title="One hand in its wrist's frame: only the fingers move">Hand</button>
     <button data-value="adapt" title="Your hand next to the ADAPT hand it drives">ADAPT</button>
   </div>
-  <div class="seg" data-key="side">
+  <div class="seg" data-key="side" id="side-seg">
     <button data-value="right">Right hand</button>
     <button data-value="left">Left hand</button>
   </div>
@@ -136,13 +137,16 @@
       <tbody id="angles"></tbody>
     </table>
     <div class="caption">Bend at the base, middle and tip joints; spread sideways at the base.</div>
+    <div class="caption" id="robot-legend" hidden><b style="color: #f5b83d">Amber</b>: the ADAPT hand, where
+      the robot goes: at your wrist, its own wrist straight; still while the robot holds.</div>
   </div>
   <div id="adapt-panel" hidden>
-    <h2>ADAPT joints, within their limits (°)</h2>
+    <h2>ADAPT joints, the pose it can take (°)</h2>
     <table class="angles mono" id="adapt-joints"></table>
     <h2>ADAPT motors (rad)</h2>
     <table class="angles mono" id="adapt-motors"></table>
-    <div class="caption">Amber: held at the robot's limit (hover for yours).</div>
+    <div class="caption">Each DIP mimics its PIP, and one motor spreads the fingers: both take the
+      closest pose. Amber: at the robot's limit. Hover for yours.</div>
   </div>
 </div>
 
@@ -357,6 +361,18 @@ const ADAPT_COUPLING = (() => {
   return c;
 })();
 
+// For each motor, the angles that keep every joint it turns within its limits, as adapt's.
+const ADAPT_MOTOR_RANGES = (() => {
+  const low = new Array(13).fill(-Infinity), high = new Array(13).fill(Infinity);
+  ADAPT_COUPLING.forEach((row, j) => row.forEach((c, m) => {
+    if (c === 0) return;
+    const [a, b] = [ADAPT_LIMITS[j][0] / c, ADAPT_LIMITS[j][1] / c].sort((x, y) => x - y);
+    low[m] = Math.max(low[m], a);
+    high[m] = Math.min(high[m], b);
+  }));
+  return [low, high];
+})();
+
 const rotAxis = (axis, angle) => {
   const [x, y, z] = norm(axis), c = Math.cos(angle), s = Math.sin(angle), t = 1 - c;
   return [[c + x * x * t, x * y * t - z * s, x * z * t + y * s],
@@ -389,28 +405,36 @@ function adaptThumbCmc(direction) {
 }
 
 // The 20 ADAPT joint angles for your hand: `angles` (5 rows of base, spread, middle, tip) and
-// `joints` (25 rows of x, y, z, qx, qy, qz, qw), as metaquest_teleop.adapt.joint_angles.
-function adaptJoints(angles, joints, clip = true, thumbRest = ADAPT_THUMB_REST) {
+// `joints` (25 rows of x, y, z, qx, qy, qz, qw), as metaquest_teleop.adapt.joint_angles: the
+// closest pose the ADAPT hand can take (each DIP mimics its PIP, one motor spreads the fingers),
+// or with `coupled` false your angle for each joint, one by one.
+function adaptJoints(angles, joints, clip = true, thumbRest = ADAPT_THUMB_REST, coupled = true) {
   const rw = quatToMat(joints[0].slice(3, 7));
   const d = sub(joints[2].slice(0, 3), joints[1].slice(0, 3));
   const local = [dot(column(rw, 0), d), dot(column(rw, 1), d), dot(column(rw, 2), d)];
   const [cmc1, cmc2] = adaptThumbCmc([local[0], -local[1], -local[2]]);
   const out = [cmc1, cmc2 - thumbRest, angles[0][2], angles[0][3]];
   for (let f = 1; f < 5; f++) out.push(-angles[f][1], angles[f][0], angles[f][2], angles[f][3]);
-  return clip ? adaptClip(out) : out;
+  let result = out;
+  if (coupled) {
+    const motors = adaptMotors(out, clip);
+    result = ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0));
+  }
+  return clip ? adaptClip(result) : result;  // coupled: only rounding to take off
 }
 
 // The 13 motor angles: the least-squares fit through the coupling, as adapt.motor_angles. Each
 // motor drives its own joints, so the fit splits: PIP and DIP averaged, one spread for all.
+// `clip` keeps each motor where all its joints stay within their limits.
 function adaptMotors(joints, clip = true) {
-  const j = clip ? adaptClip(joints) : joints;
   const C = ADAPT_COUPLING, q = new Array(13).fill(0);
   for (let m = 0; m < 13; m++) {
     let num = 0, den = 0;
-    for (let r = 0; r < 20; r++) { num += C[r][m] * j[r]; den += C[r][m] * C[r][m]; }
+    for (let r = 0; r < 20; r++) { num += C[r][m] * joints[r]; den += C[r][m] * C[r][m]; }
     q[m] = num / den;
   }
-  return q;
+  const [low, high] = ADAPT_MOTOR_RANGES;
+  return clip ? q.map((v, m) => Math.min(Math.max(v, low[m]), high[m])) : q;
 }
 
 // The ADAPT hand's shape: for each digit, its base, four joints and tip, in its base frame [m].
@@ -855,15 +879,17 @@ const adaptJointCells = adaptTable("adapt-joints", ADAPT_JOINT_ROWS);
 const adaptMotorCells = adaptTable("adapt-motors", ADAPT_MOTOR_ROWS);
 
 function updateAdaptPanel(hand) {
-  const raw = hand ? adaptJoints(handAngles(hand), hand.joints, false) : null;
-  const joints = raw ? adaptClip(raw) : null;
+  // The pose the robot takes (each DIP its PIP, one spread for all), and yours, joint by joint.
+  const joints = hand ? adaptJoints(handAngles(hand), hand.joints) : null;
+  const wanted = hand ? adaptJoints(handAngles(hand), hand.joints, false, ADAPT_THUMB_REST, false) : null;
   const motors = joints ? adaptMotors(joints) : null;
   adaptJointCells.forEach(([cell, i]) => {
     if (!joints) { cell.textContent = ""; return; }
-    const [lo, hi] = ADAPT_LIMITS[i], held = Math.abs(raw[i] - joints[i]) > 1e-9, spread = i % 4 === 0 && i > 3;
+    const [lo, hi] = ADAPT_LIMITS[i], spread = i % 4 === 0 && i > 3;
+    const atLimit = [lo, hi].some((edge) => edge !== 0 && Math.abs(joints[i] - edge) < 1e-6);
     cell.textContent = deg(joints[i], spread);
-    cell.className = held ? "out" : "";
-    cell.title = held ? `yours: ${deg(raw[i], spread)}; the robot's range: ${deg(lo)} to ${deg(hi)}` : "";
+    cell.className = atLimit ? "out" : "";
+    cell.title = `yours: ${deg(wanted[i], spread)}; the robot's range: ${deg(lo)} to ${deg(hi)}`;
   });
   const all = motors ? motors.concat([0, 0]) : null;  // and the wrist's two, which stay at 0, 0
   adaptMotorCells.forEach(([cell, m]) => {
@@ -900,6 +926,14 @@ function updatePanels() {
   }
 
   $("robot-toggle").hidden = !(DEMO || (robotCommand && robotCommand.adapt));
+  const only = !DEMO && status && status.hands !== "both" ? status.hands : null;  // the one hand streamed
+  $("side-seg").hidden = Boolean(only);
+  if (only && state.side !== only) {
+    state.side = only;
+    trail = [];
+    syncControls();
+  }
+  $("robot-legend").hidden = !(state.mode === "room" && state.robot && robotNow());
   const hand = frame && frame[state.side];
   const side = state.side.toUpperCase();
   $("human-panel").hidden = $("hand-wrist").hidden = $("hand-pinch").hidden = state.mode === "adapt";

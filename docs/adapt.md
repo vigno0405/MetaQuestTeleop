@@ -50,11 +50,26 @@ or while a hand is not seen ([teleoperation](teleop.md)). `--no-adapt` leaves th
 
 | ADAPT joint | From your hand |
 |---|---|
-| each finger's MCP, PIP, DIP | your bend at the base, middle and tip joints: PIP and DIP can differ |
-| each finger's spread | your sideways spread, with the opposite sign: the ADAPT hand counts towards the pinky |
+| each finger's MCP | your bend at the base |
+| each finger's PIP and DIP | both the **mean** of your middle and tip bends: on the ADAPT hand the DIP mimics the PIP (below) |
+| each finger's spread | your sideways spread, with the opposite sign (the ADAPT hand counts towards the pinky); one motor spreads the fingers together (below) |
 | thumb MCP, IP | your thumb's bend at its middle and tip joints |
 | thumb CMC1 | the angle that points the robot's thumb where your thumb's first bone points |
 | thumb CMC2 | the same, measured from a relaxed thumb (below) |
+
+## A pose the ADAPT hand can take
+
+The ADAPT hand's joints are coupled, as in VirtualModelControl and HumanManipulationVMC:
+
+- **each finger's DIP mimics its PIP**: one motor turns both through the same cable, by the
+  same angle. So PIP and DIP are always equal. Both take the mean of yours, which keeps your
+  fingertip pointing where it points (PIP + DIP is the same).
+- **one motor spreads the index, ring and pinky** together, the middle finger not at all. The
+  spreads take the best fit of yours.
+
+So `adapt.joint_angles(hand)` is always a pose the robot can take: the dashboard, `--print_joints`
+and `/metaquest/adapt/joint_states` show what the robot does. `joint_angles(hand, coupled=False)`
+gives your angles one by one instead, PIP and DIP apart.
 
 ## Limits
 
@@ -80,7 +95,8 @@ come closest to the joints:
 - one motor spreads the index, ring and pinky (the middle finger does not move): it takes the
   **best fit** of the three.
 
-`adapt.COUPLING @ motors` gives the joint angles the robot will actually reach.
+Each motor then stays where all its joints are within their limits. `adapt.COUPLING @ motors`
+gives the joint angles the robot will reach: exactly `adapt.joint_angles(hand)`.
 
 ## The thumb
 

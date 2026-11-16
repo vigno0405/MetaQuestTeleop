@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.1 (2026-11-16)
+
+- The ADAPT joint angles are a pose the ADAPT hand can take, as in its kinematics
+  (VirtualModelControl, HumanManipulationVMC): each finger's DIP mimics its PIP, so both take the
+  mean of yours, which keeps your fingertip's direction; one motor spreads the fingers, so the
+  spreads take the best fit of yours. The dashboard, `--print_joints`, the 3D view and
+  `/metaquest/adapt/joint_states` all show that pose. `joint_angles(hand, coupled=False)` gives
+  your angles one by one, as before.
+- Motor targets: each motor stays where all its joints are within their limits.
+- 3D view: with one hand streamed (the default), it is the hand shown, with no hand to pick; in
+  Room, a line says what the amber ADAPT hand is.
+
 ## 0.6.0 (2026-11-16)
 
 - The dashboard shows the ADAPT hand next to yours, in yellow: its joints as the robot gets them
