@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.3 (2026-11-16)
 
 - ROS 2 from any Python: from one that cannot load ROS 2, such as a conda environment with
   Python 3.10 and ROS 2 Jazzy on 3.12, `metaquest-teleop` now publishes anyway, through a small
