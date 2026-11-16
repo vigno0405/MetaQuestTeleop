@@ -457,6 +457,7 @@ globalThis.XRWebGLLayer = function () {};
 """
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_the_page_tells_a_restarted_computer_it_is_still_streaming(tmp_path):
     # metaquest-teleop restarts while the headset streams: the page reconnects by itself and says
     # again that it is streaming, so the new one does not ask for Start.
