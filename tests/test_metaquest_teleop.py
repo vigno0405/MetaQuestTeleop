@@ -618,3 +618,89 @@ def test_the_command_stops_on_ctrl_c_and_on_request_with_ros(stop):
     assert "publishing on ROS 2" in output
     if stop == "SIGINT":
         assert command.returncode == 0 and "Stopped after" in output
+
+
+@pytest.mark.parametrize("no_adapt", [False, True])
+def test_print_joints_prints_all_your_joints_and_the_adapt_ones_unless_turned_off(no_adapt):
+    import signal
+    import sys
+
+    port = _free_port()
+    command = [sys.executable, "-m", "metaquest_teleop", "--no-adb", "--no-ros", "--port", str(port), "--print_joints"]
+    process = subprocess.Popen(command + (["--no-adapt"] if no_adapt else []),
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    guard = threading.Timer(30.0, process.kill)
+    guard.start()
+    try:
+        for _ in range(100):  # wait until it serves
+            with socket.socket() as s:
+                if s.connect_ex(("127.0.0.1", port)) == 0:
+                    break
+            time.sleep(0.1)
+        headset = threading.Thread(target=lambda: asyncio.run(
+            stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=1.5)))
+        headset.start()
+        lines = []
+        for line in process.stdout:
+            lines.append(line.rstrip("\n"))
+            if sum(" right " in f" {line} " for line in lines) >= 5:
+                break
+        headset.join(5.0)  # let the fake headset finish before stopping the command
+        process.send_signal(signal.SIGINT)
+        process.communicate(timeout=10)
+    finally:
+        guard.cancel()
+        if process.poll() is None:
+            process.kill()
+    yours = [line for line in lines if "  right  thumb" in line]
+    adapt_lines = [line for line in lines if "  ADAPT  thumb" in line]
+    assert yours and all(line.count("|") >= 4 for line in yours)  # all five fingers
+    assert any("joint angles, degrees" in line for line in lines)
+    if no_adapt:
+        assert not adapt_lines and not any("ADAPT joints" in line for line in lines)
+        assert all("robot moving" in line for line in yours[1:])  # the state ends your line
+    else:
+        assert adapt_lines and any("ADAPT joints" in line for line in lines)
+        assert all("robot moving" in line for line in adapt_lines[1:])  # ... or the ADAPT line
+
+
+def test_ros_without_adapt_publishes_all_your_joints_but_no_adapt_topics():
+    rclpy = pytest.importorskip("rclpy")
+    from geometry_msgs.msg import PoseArray
+    from sensor_msgs.msg import JointState
+    from std_msgs.msg import Bool
+
+    from metaquest_teleop import Teleop
+    from metaquest_teleop.ros import RosPublisher
+
+    topics = {"/metaquest/right/joint_states": JointState, "/metaquest/right/joints": PoseArray,
+              "/metaquest/teleop/hold": Bool, "/metaquest/adapt/joint_states": JointState,
+              "/metaquest/adapt/motors": JointState}
+    port = _free_port()
+    rclpy.init()
+    try:
+        listener = rclpy.create_node("metaquest_test_no_adapt")
+        got, holds = {}, []
+        def keep(msg, topic):
+            got[topic] = msg
+            if topic == "/metaquest/teleop/hold":
+                holds.append(msg.data)
+        for topic, kind in topics.items():
+            listener.create_subscription(kind, topic, lambda msg, t=topic: keep(msg, t), 10)
+        with QuestHands(port, adb=False) as quest:
+            ros = RosPublisher(quest, adapt=False, teleop=Teleop(quest, adapt=False))
+            headset = threading.Thread(target=lambda: asyncio.run(
+                stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=2.0)))
+            headset.start()
+            deadline = time.monotonic() + 6.0
+            while time.monotonic() < deadline:  # long enough for any ADAPT topic to show up
+                rclpy.spin_once(listener, timeout_sec=0.05)
+            ros.close()
+            headset.join(5.0)
+        listener.destroy_node()
+    finally:
+        rclpy.shutdown()
+    assert len(got["/metaquest/right/joint_states"].position) == 20
+    assert len(got["/metaquest/right/joints"].poses) == 25
+    assert False in holds and holds[-1] is True  # moving while frames came, holding once they stopped
+    assert "/metaquest/adapt/joint_states" not in got and "/metaquest/adapt/motors" not in got

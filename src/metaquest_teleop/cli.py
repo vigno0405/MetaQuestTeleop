@@ -2,8 +2,8 @@
 
     metaquest-teleop                        # then open http://localhost:8012 in the Quest browser
     metaquest-teleop --view                 # also open the 3D view of the hands in a browser
-    metaquest-teleop --print_joints         # print the joint angles instead of the dashboard
-    metaquest-teleop --print_joints adapt   # ... the ADAPT hand's
+    metaquest-teleop --print_joints         # print your joint angles and the ADAPT hand's
+    metaquest-teleop --no-adapt             # no ADAPT hand: no ADAPT topics, no ADAPT joints
     metaquest-teleop --no-ros               # not on ROS 2 (the default publishes when ROS is found)
     metaquest-teleop --udp 127.0.0.1:9000   # also send every frame as JSON to a UDP port
     metaquest-teleop-fake                   # in a second terminal: a fake headset, for testing
@@ -45,18 +45,27 @@ def joints_header(which: str) -> str:
     return "joint angles, degrees: each finger base spread middle tip"
 
 
+def _angles_line(label: str, degrees: np.ndarray, names) -> str:
+    return f"{label:5s}  " + " | ".join(
+        f"{name} " + " ".join(f"{v:+4.0f}" for v in row) for name, row in zip(names, degrees))
+
+
 def joints_line(side: str, hand: Hand | None, which: str) -> str:
     """One line of ``--print_joints``: the hand's joint angles, or the ADAPT hand's, in degrees."""
     if hand is None:
         return f"{side:5s}  not tracked"
     if which == "adapt":
-        values = np.degrees(adapt.joint_angles(hand)).reshape(5, 4)
-        names = adapt.DIGITS
-    else:
-        values = np.degrees(hand.angles)
-        names = FINGERS
-    return f"{side:5s}  " + " | ".join(
-        f"{name} " + " ".join(f"{v:+4.0f}" for v in row) for name, row in zip(names, values))
+        return _angles_line(side, np.degrees(adapt.joint_angles(hand)).reshape(5, 4), adapt.DIGITS)
+    return _angles_line(side, np.degrees(hand.angles), FINGERS)
+
+
+def adapt_line(teleop: Teleop) -> str:
+    """The ADAPT hand's line of ``--print_joints``: its joints as the robot gets them, which hold
+    still while the robot holds (as on ``/metaquest/adapt/joint_states``)."""
+    joints = teleop.command().joints
+    if joints is None:
+        return "ADAPT  waiting for both hands"
+    return _angles_line("ADAPT", np.degrees(joints).reshape(5, 4), adapt.DIGITS)
 
 
 def robot_state(teleop: Teleop) -> str:
@@ -65,22 +74,27 @@ def robot_state(teleop: Teleop) -> str:
     return "robot moving" if not command.hold else f"robot HOLD ({command.reason})"
 
 
-def print_joints(quest: QuestHands, which: str, teleop: Teleop) -> None:
-    """Print the joint angles of the kept hands, ``PRINT_HZ`` lines a second, until Ctrl-C."""
+def print_joints(quest: QuestHands, teleop: Teleop) -> None:
+    """Print, ``PRINT_HZ`` times a second until Ctrl-C, all the joint angles of the kept hands and,
+    when the teleoperation drives the ADAPT hand, the ADAPT hand's joints, with the robot's state."""
     print(f"page {quest.url}   3D view {quest.view_url}", flush=True)
-    print(joints_header(which), flush=True)
+    print(joints_header("hand"), flush=True)
+    if teleop.adapt:
+        print(joints_header("adapt"), flush=True)
     sides = ("left", "right") if quest.hands == "both" else (quest.hands,)
-    if which == "adapt":
-        sides = ("right",)
     while True:
         frame = quest.wait(timeout=1.0)
+        now = time.strftime("%H:%M:%S")
         if frame is None:
-            print(f"{time.strftime('%H:%M:%S')}  no frames: open {quest.url} in the headset and press Start"
+            print(f"{now}  no frames: open {quest.url} in the headset and press Start"
                   f"  | {robot_state(teleop)}", flush=True)
             continue
-        for side in sides:
-            print(f"{time.strftime('%H:%M:%S')}  " + joints_line(side, frame.hand(side), which)
-                  + f"  | {robot_state(teleop)}", flush=True)
+        lines = [joints_line(side, frame.hand(side), "hand") for side in sides]
+        if teleop.adapt:
+            lines.append(adapt_line(teleop))
+        lines[-1] += f"  | {robot_state(teleop)}"
+        for line in lines:
+            print(f"{now}  {line}", flush=True)
         time.sleep(1.0 / PRINT_HZ)
 
 
@@ -100,21 +114,19 @@ def main() -> int:
                         help="also send every frame as JSON to this UDP address")
     parser.add_argument("--no-adb", action="store_true", help="do not set up the USB link (adb reverse) automatically")
     parser.add_argument("--plain", action="store_true", help="one status line per second instead of the dashboard")
-    parser.add_argument("--print_joints", "--print-joints", nargs="?", const="hand", choices=("hand", "adapt"),
-                        help="print the joint angles (or, with 'adapt', the ADAPT hand's) instead of the dashboard")
+    parser.add_argument("--print_joints", "--print-joints", action="store_true",
+                        help="print your joint angles and the ADAPT hand's instead of the dashboard")
     parser.add_argument("--view", action="store_true", help="also open the 3D view of the hands in a browser")
     parser.add_argument("--ros", dest="ros", action="store_const", const="on", default="auto",
                         help="publish on ROS 2 topics (/metaquest/...); the default when ROS 2 is found")
     parser.add_argument("--no-ros", dest="ros", action="store_const", const="off",
                         help="do not publish on ROS 2")
     parser.add_argument("--no-adapt", action="store_true",
-                        help="no ADAPT hand: no ADAPT topics, and the teleoperation gives your own joint angles")
+                        help="no ADAPT hand: no ADAPT topics or printed ADAPT joints; the teleoperation gives your own joint angles")
     parser.add_argument("--hands", choices=("right", "left", "both"), default="right",
                         help="the hands to stream (default right)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args()
-    if args.no_adapt and args.print_joints == "adapt":
-        parser.error("--print_joints adapt needs the ADAPT hand: leave out --no-adapt")
 
     RosPublisher = None  # noqa: N806
     if args.ros != "off":
@@ -141,7 +153,7 @@ def main() -> int:
         webbrowser.open(quest.view_url)
     try:
         if args.print_joints:
-            print_joints(quest, args.print_joints, teleop)
+            print_joints(quest, teleop)
         elif args.plain or not sys.stdout.isatty():
             plain(quest)
         else:

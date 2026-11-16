@@ -40,7 +40,9 @@ hand's topics.
 | `/metaquest/teleop/state` | `std_msgs/String` | `moving`, or why it holds |
 | `/metaquest/teleop/wrist` | `geometry_msgs/PoseStamped` | where the robot's wrist goes |
 
-Every frame publishes, up to 120 times a second. The ADAPT joints and motors hold still while
+Your hand's `/metaquest/right/...` topics always come; the `/metaquest/adapt/...` ones come
+with them while the ADAPT hand is on, the default, and not with `--no-adapt`. Every frame
+publishes, up to 120 times a second. The ADAPT joints and motors hold still while
 the robot holds; `hold` and `state` keep coming, ten times a second, while frames stop. Poses
 are in the frame `metaquest_floor`, the headset's room: x right, y up, −z forward. With
 `--hands both`, the left hand has its own `/metaquest/left/...` topics.

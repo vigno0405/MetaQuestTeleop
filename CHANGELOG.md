@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- `metaquest-teleop --print_joints` prints all your joint angles and, under them, the ADAPT
+  hand's as the robot gets them (they hold still while the robot holds); with `--no-adapt`,
+  yours only. `--print_joints adapt` is gone: plain `--print_joints` shows both.
+- Docs: the title is just "metaquest-teleop", and the GitHub badge in the header no longer
+  stays on an old release.
+
 ## 0.5.0 (2026-11-16)
 
 - Teleoperation (`Teleop`): your right hand drives the robot; pinch your left hand to hold it
