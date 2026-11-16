@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0
+## 0.4.0 (2026-11-16)
 
 - The right hand only, by default: `QuestHands(hands="right")`, `metaquest-teleop` and
   `metaquest-teleop-fake`. `hands="both"` (`--hands both`) keeps both, `"left"` the left one.
