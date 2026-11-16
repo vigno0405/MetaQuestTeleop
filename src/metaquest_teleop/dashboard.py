@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from . import adapt
 from .hands import FINGERS, Hand
 from .server import QuestHands
 
@@ -112,17 +113,67 @@ def _hand(side: str, hand: Hand | None) -> Panel:
                  title_align="left", border_style="green", box=box.ROUNDED)
 
 
+def _adapt_cell(joints: np.ndarray, i: int) -> Text:
+    """One ADAPT joint: bending ones with a bar across their range, sideways ones signed; yellow at a limit."""
+    name = adapt.JOINTS[i]
+    low, high = adapt.JOINT_LIMITS[name]
+    value = float(joints[i])
+    style = "bold yellow" if any(abs(value - edge) < 1e-6 and edge != 0.0 for edge in (low, high)) else ""
+    if name.endswith("spread") or name == "thumb_CMC2":  # sideways, either way from straight
+        return Text(_deg(np.degrees(value), True), style=style)
+    return Text(f"{_bar(np.degrees(value), width=5, full=np.degrees(high))}{_deg(np.degrees(value))}", style=style)
+
+
+def _adapt(teleop) -> Panel:
+    """The ADAPT hand as the robot gets it: what the teleoperation commands, still while it holds."""
+    command = teleop.command()
+    if not command.hold:
+        state = "[green]● moving"
+    else:
+        state = f"[{'yellow' if 'pinching' in command.reason else 'red'}]● holding: {command.reason}"
+    title = f"[bold yellow]ADAPT[/]  {state}"
+    if command.joints is None:
+        return Panel(Text("waiting for both hands", style="dim"), title=title, title_align="left",
+                     border_style="yellow", box=box.ROUNDED)
+    joints = np.asarray(command.joints, dtype=float)
+    info = Table.grid(padding=(0, 2))
+    info.add_column(style="yellow")
+    if command.wrist is not None:
+        p = command.wrist.position
+        info.add_row("arm", f"x {p[0]:+.3f}   y {p[1]:+.3f}   z {p[2]:+.3f}  m")
+    info.add_row("wrist", Text.assemble(f"yaw {_deg(0.0)}  pitch {_deg(0.0)}", ("   fixed: a PID holds it", "dim")))
+    info.add_row("", "")  # so the table starts on the same line as your hand's
+
+    table = Table(box=None, padding=(0, 1), header_style="dim", show_edge=False,
+                  caption="bars span each range; yellow: at a limit", caption_style="dim")
+    table.add_column("")
+    for name in ("spread", "MCP", "PIP", "DIP"):
+        table.add_column(name, justify="right" if name == "spread" else "left")
+    for d, digit in enumerate(adapt.DIGITS[1:], start=1):
+        table.add_row(digit, *(_adapt_cell(joints, 4 * d + k) for k in range(4)))
+    # The thumb in the same columns: its sideways joint (CMC2) under spread, then its bending ones.
+    table.add_row("", *(Text(name, style="dim") for name in ("CMC2", "CMC1", "MCP", "IP")))
+    table.add_row("thumb", *(_adapt_cell(joints, k) for k in (1, 0, 2, 3)))
+    return Panel(Group(info, Text(), table), title=title, title_align="left", border_style="yellow",
+                 box=box.ROUNDED)
+
+
 def render(quest: QuestHands, width: int = 120) -> Group:
     """The dashboard for the current state of ``quest``, as a rich renderable ``width`` wide."""
     frame = quest.latest()
     fresh = frame is not None and time.time() - frame.received < _STALE_S
     sides = ("left", "right") if quest.hands == "both" else (quest.hands,)
     panels = [_hand(side, frame.hand(side) if fresh else None) for side in sides]
-    if width >= 104 and len(panels) == 2:
+    if quest.teleop is not None and quest.teleop.adapt:  # the ADAPT hand, next to yours
+        panels.append(_adapt(quest.teleop))
+    columns = min(len(panels), max(1, width // 52))
+    if columns > 1:
         hands = Table.grid(expand=True, padding=(0, 1))
-        hands.add_column(ratio=1)
-        hands.add_column(ratio=1)
-        hands.add_row(*panels)
+        for _ in range(columns):
+            hands.add_column(ratio=1)
+        for i in range(0, len(panels), columns):
+            row = panels[i:i + columns]
+            hands.add_row(*row, *([""] * (columns - len(row))))
     else:
         hands = Group(*panels)
     return Group(_status(quest), hands, Text("  Ctrl-C to stop", style="dim"))

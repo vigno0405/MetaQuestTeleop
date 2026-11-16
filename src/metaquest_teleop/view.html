@@ -121,6 +121,7 @@
     <button data-toggle="follow" title="Keep the selected hand in the middle">Follow</button>
     <button data-toggle="trail" title="The wrist's path over the last two seconds">Trail</button>
     <button data-toggle="axes" title="The axes of the space and of the wrist">Axes</button>
+    <button data-toggle="robot" id="robot-toggle" title="The ADAPT hand where the robot puts it: at your wrist, its own wrist straight (0, 0); still while the robot holds">Robot</button>
   </div>
   <div class="seg"><button id="reset" title="Back to the starting viewpoint (or double-click)">Reset view</button></div>
 </div>
@@ -428,6 +429,23 @@ function adaptPositions(joints) {
   });
   return out;
 }
+
+// Your wrist with the ADAPT base frame's axes, as adapt.wrist_pose: (x, y, z, qx, qy, qz, qw).
+function adaptWrist(joint) {
+  const r = quatToMat(joint.slice(3, 7)).map((row) => [row[0], -row[1], -row[2]]);
+  return joint.slice(0, 3).concat(matToQuat(r));
+}
+
+// The ADAPT hand in the room: its base at `wrist` (as adaptWrist, or where the teleoperation puts
+// it), its own wrist straight at 0, 0. For each digit its points as adaptPositions, and its wrist
+// (the palm's origin), in the room [m].
+function adaptInRoom(wrist, joints) {
+  const r = quatToMat(wrist.slice(3, 7)), o = wrist.slice(0, 3);
+  const toRoom = (a) => add(o, matVec(r, a));
+  const shape = adaptPositions(joints), out = { wrist: toRoom(ADAPT_PALM) };
+  ADAPT_DIGITS.forEach((d) => { out[d] = shape[d].map(toRoom); });
+  return out;
+}
 // math-end
 
 // ------------------------------------------------------------------------------- settings
@@ -453,6 +471,7 @@ const state = {
   mode: ["hand", "adapt"].includes(params.get("mode")) ? params.get("mode") : "room",
   side: params.get("hand") === "left" ? "left" : "right",
   follow: true, trail: true, axes: true,
+  robot: !params.has("demo") || params.has("robot"),  // the ADAPT hand in the room
 };
 // The starting viewpoints. Room: about where your eyes are, a little above and towards the
 // middle from the selected hand, so it looks as you see it. Hand: from the thumb's side.
@@ -472,6 +491,7 @@ if (DEMO) document.body.classList.add("demo");
 
 // ------------------------------------------------------------------------------- data
 let frame = null, status = null, linkUp = false, lastFrameAt = -Infinity, everFrame = false;
+let robotCommand = null;  // what the teleoperation commands: hold, reason, wrist, joints
 let trail = [];  // [time ms, wrist position] of the selected hand
 
 function connect() {
@@ -480,6 +500,7 @@ function connect() {
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.status) status = msg.status;
+    if ("robot" in msg) robotCommand = msg.robot;
     if (msg.frame) {
       frame = msg.frame;
       lastFrameAt = performance.now();
@@ -613,7 +634,7 @@ function addHead(cam, head) {
 // The forearm, as a translucent sleeve from the wrist towards the elbow (the wrist's +z), so the
 // skeleton reads as a hand on an arm; its palm side (the wrist's -y) is blue. `toSpace` takes a
 // point in the wrist's frame to the drawing's space.
-function addSleeve(cam, toSpace, alpha) {
+function addSleeve(cam, toSpace, alpha, robot = false) {
   const N = 20;
   const rings = [[0.0, 0.03, 0.019], [0.05, 0.033, 0.022], [0.11, 0.036, 0.026]];  // z, x and y radii, m
   const pts = rings.map(([z, rx, ry]) => Array.from({ length: N }, (_, i) => {
@@ -626,10 +647,13 @@ function addSleeve(cam, toSpace, alpha) {
       const j = (i + 1) % N;
       const palmSide = Math.sin((2 * Math.PI * (i + 0.5)) / N) < 0;
       addPoly(cam, [pts[r][i], pts[r][j], pts[r + 1][j], pts[r + 1][i]],
-              palmSide ? `rgba(138, 180, 248, ${0.24 * fade})` : `rgba(230, 237, 243, ${0.16 * fade})`, alpha);
+              robot ? `rgba(245, 184, 61, ${(palmSide ? 0.22 : 0.1) * fade})`
+                    : palmSide ? `rgba(138, 180, 248, ${0.24 * fade})` : `rgba(230, 237, 243, ${0.16 * fade})`, alpha);
     }
   }
-  for (let i = 0; i < N; i++) addLine(cam, pts[0][i], pts[0][(i + 1) % N], "rgba(230, 237, 243, 0.55)", 0.0012, alpha);
+  for (let i = 0; i < N; i++) {
+    addLine(cam, pts[0][i], pts[0][(i + 1) % N], robot ? "rgba(245, 184, 61, 0.6)" : "rgba(230, 237, 243, 0.55)", 0.0012, alpha);
+  }
 }
 
 // A point in a hand's wrist frame, in the room's space.
@@ -688,6 +712,8 @@ function draw() {
         if (state.axes) addAxes(cam, pts[0], quatToMat(h.joints[0].slice(3, 7)), 0.06, null, alpha);
       }
     }
+    const robot = state.robot ? robotNow() : null;
+    if (robot) addRobot(cam, robot, alive ? 1 : 0.3);
     if (state.trail && alive) {
       for (let i = 1; i < trail.length; i++) {
         const age = (now - trail[i][0]) / (TRAIL_S * 1000);
@@ -707,6 +733,41 @@ function draw() {
   }
   paint();
   requestAnimationFrame(draw);
+}
+
+// The ADAPT hand in the room, as the robot gets it: where the teleoperation puts it, still while
+// the robot holds (from metaquest-teleop); in the demo, at your right hand as it is.
+function robotNow() {
+  if (robotCommand) {
+    const c = robotCommand;
+    return c.adapt && c.wrist && c.joints ? { wrist: c.wrist, joints: c.joints, hold: c.hold } : null;
+  }
+  const hand = DEMO && frame && frame.right;
+  if (!hand) return null;
+  return { wrist: adaptWrist(hand.joints[0]), joints: adaptJoints(handAngles(hand), hand.joints), hold: false };
+}
+
+const ROBOT_COLOR = "#f5b83d";  // amber, as the ADAPT panel in the terminal
+
+function addRobot(cam, robot, alpha) {
+  // Where its motors would put it: the joints through the coupling, as in the ADAPT view.
+  const motors = adaptMotors(robot.joints);
+  const pts = adaptInRoom(robot.wrist, ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0)));
+  const r = quatToMat(robot.wrist.slice(3, 7)), o = robot.wrist.slice(0, 3);
+  // Its forearm, straight on: the wrist stays at 0, 0. The sleeve's frame (your wrist's axes) is
+  // the ADAPT base frame turned half a turn about x.
+  addSleeve(cam, (l) => add(o, matVec(r, add(ADAPT_PALM, [l[0], -l[1], -l[2]]))), alpha, true);
+  // A translucent body under your skeleton: wide bones, small joints.
+  const ghost = 0.6 * alpha;
+  addPoly(cam, [pts.wrist].concat(ADAPT_DIGITS.map((d) => pts[d][0])), "rgba(245, 184, 61, 0.16)", alpha);
+  ADAPT_DIGITS.forEach((d) => {
+    const q = pts[d];
+    for (let k = 1; k < q.length; k++) addLine(cam, q[k - 1], q[k], ROBOT_COLOR, 0.009, ghost);
+    q.forEach((p, k) => addDot(cam, p, k === q.length - 1 ? 0.0055 : 0.004, ROBOT_COLOR, ghost));
+  });
+  addDot(cam, pts.wrist, 0.008, ROBOT_COLOR, ghost);
+  addLabel(cam, add(o, matVec(r, [0, -0.03, 0.21])), robot.hold ? "ADAPT · holding" : "ADAPT", ROBOT_COLOR, alpha);
+  if (state.axes) addAxes(cam, o, r, 0.05, null, alpha);
 }
 
 // Your hand on the left; on the right the ADAPT hand, where its motors would put it.
@@ -761,6 +822,7 @@ const ADAPT_MOTOR_ROWS = [
   ["head", "", "CMC1", "CMC2", "MCP", "IP"], ["thumb", 0, 1, 2, 3],
   ["head", "", "MCP", "PIP"], ["index", 5, 6], ["middle", 7, 8], ["ring", 9, 10], ["pinky", 11, 12],
   ["spread", 4],
+  ["head", "", "yaw", "pitch"], ["wrist", 13, 14],
 ];
 
 function adaptTable(id, rows) {
@@ -803,7 +865,11 @@ function updateAdaptPanel(hand) {
     cell.className = held ? "out" : "";
     cell.title = held ? `yours: ${deg(raw[i], spread)}; the robot's range: ${deg(lo)} to ${deg(hi)}` : "";
   });
-  adaptMotorCells.forEach(([cell, m]) => { cell.textContent = motors ? (motors[m] >= 0 ? "+" : "") + motors[m].toFixed(2) : ""; });
+  const all = motors ? motors.concat([0, 0]) : null;  // and the wrist's two, which stay at 0, 0
+  adaptMotorCells.forEach(([cell, m]) => {
+    cell.textContent = all ? (all[m] >= 0 ? "+" : "") + all[m].toFixed(2) : "";
+    if (m >= 13) cell.title = "fixed at 0, 0: a PID holds it";
+  });
 }
 
 function updatePanels() {
@@ -833,6 +899,7 @@ function updatePanels() {
                         teleop === "moving" ? "moving" : `holding: ${teleop}`);
   }
 
+  $("robot-toggle").hidden = !(DEMO || (robotCommand && robotCommand.adapt));
   const hand = frame && frame[state.side];
   const side = state.side.toUpperCase();
   $("human-panel").hidden = $("hand-wrist").hidden = $("hand-pinch").hidden = state.mode === "adapt";
@@ -951,7 +1018,7 @@ function syncControls() {
     b.classList.toggle("on", state[b.dataset.toggle]);
     b.disabled = state.mode !== "room" && b.dataset.toggle !== "axes";
   });
-  history.replaceState(null, "", `?${DEMO ? "demo&" : ""}mode=${state.mode}&hand=${state.side}`);
+  history.replaceState(null, "", `?${DEMO ? "demo&" : ""}mode=${state.mode}&hand=${state.side}${DEMO && state.robot ? "&robot" : ""}`);
 }
 
 function resetView() {

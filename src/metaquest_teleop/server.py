@@ -301,6 +301,8 @@ class QuestHands:
                 if self.frames != sent:
                     sent, frame = self.frames, self.latest()
                     message["frame"] = None if frame is None else frame.to_dict()
+                    if self.teleop is not None:
+                        message["robot"] = self._view_robot()
                 now = time.perf_counter()
                 if now - status_at >= 0.5:
                     status_at = now
@@ -310,6 +312,14 @@ class QuestHands:
                 await asyncio.sleep(1.0 / _VIEW_HZ)
         except ConnectionError:
             return  # the view closed while a message was on its way
+
+    def _view_robot(self) -> dict:
+        """What the teleoperation commands, for the 3D view to draw the robot hand where it goes."""
+        command = self.teleop.command()
+        wrist = command.wrist
+        return {"adapt": self.teleop.adapt, "hold": command.hold, "reason": command.reason,
+                "wrist": None if wrist is None else [*map(float, wrist.position), *map(float, wrist.quaternion)],
+                "joints": None if command.joints is None else [float(v) for v in command.joints]}
 
     def _view_status(self) -> dict:
         rates = self.rates()

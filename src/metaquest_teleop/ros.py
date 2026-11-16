@@ -25,7 +25,8 @@ and, from the right hand, for the ADAPT hand (``metaquest_teleop.adapt``):
 
 ==================================  ===========================  ===================================
 ``/metaquest/adapt/joint_states``   sensor_msgs/JointState       its 20 joint angles, within limits
-``/metaquest/adapt/motors``         sensor_msgs/JointState       its 13 motor angles: PID targets
+``/metaquest/adapt/motors``         sensor_msgs/JointState       its 13 motors, then its 2 wrist motors
+                                                                 at 0: the targets of a PID
 ``/metaquest/adapt/wrist``          geometry_msgs/PoseStamped    your wrist, with the ADAPT axes
 ==================================  ===========================  ===================================
 
@@ -195,9 +196,10 @@ class RosPublisher:
             if joints is not None:
                 messages.append((f"{self._prefix}/adapt/joint_states", stamp,
                                  (adapt.JOINTS, np.asarray(joints, float).tolist())))
-            if motors is not None:
+            if motors is not None:  # and the wrist's two, which stay at 0, 0
                 messages.append((f"{self._prefix}/adapt/motors", stamp,
-                                 (adapt.MOTORS, np.asarray(motors, float).tolist())))
+                                 (adapt.MOTORS + adapt.WRIST_MOTORS,
+                                  np.asarray(motors, float).tolist() + list(adapt.WRIST_ANGLES))))
             messages.append((f"{self._prefix}/adapt/wrist", stamp, _pose(adapt.wrist_pose(frame.right))))
         if command is not None:
             messages += self._teleop(command, stamp)

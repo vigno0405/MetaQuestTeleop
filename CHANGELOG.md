@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 (2026-11-16)
+
+- The dashboard shows the ADAPT hand next to yours, in yellow: its joints as the robot gets them
+  (still while it holds), and its wrist, fixed at (0, 0).
+- The 3D view's **Room** shows the ADAPT hand where the robot goes (**Robot**): at your wrist,
+  its own wrist straight, still while the robot holds.
+- The ADAPT wrist stays at (0, 0), held by a PID: `adapt.WRIST_MOTORS`, and
+  `/metaquest/adapt/motors` ends with its two motors at 0. The docs say so.
+
 ## 0.5.3 (2026-11-16)
 
 - ROS 2 from any Python: from one that cannot load ROS 2, such as a conda environment with

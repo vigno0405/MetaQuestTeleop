@@ -27,7 +27,7 @@ so. Without ROS it runs as usual and says it is not publishing. `--ros` makes RO
 | `/metaquest/right/joints` | `geometry_msgs/PoseArray` | your 25 joints |
 | `/metaquest/right/pinch` | `std_msgs/Float64` | thumb tip to index tip, metres |
 | `/metaquest/adapt/joint_states` | `sensor_msgs/JointState` | the ADAPT hand's 20 joint angles |
-| `/metaquest/adapt/motors` | `sensor_msgs/JointState` | its 13 motor angles: targets for a PID |
+| `/metaquest/adapt/motors` | `sensor_msgs/JointState` | its 13 motor angles, then its 2 wrist motors at 0 ([fixed](adapt.md#the-wrist)): targets for a PID |
 | `/metaquest/adapt/wrist` | `geometry_msgs/PoseStamped` | your wrist, with the ADAPT axes |
 | `/metaquest/teleop/hold` | `std_msgs/Bool` | true: keep the robot still ([teleoperation](teleop.md)) |
 | `/metaquest/teleop/state` | `std_msgs/String` | `moving`, or why it holds |

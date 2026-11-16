@@ -16,6 +16,12 @@ Your hand is on the left; the ADAPT hand on the right is where its motors would 
 angles are held at the robot's limit. While `metaquest-teleop` runs, the same view is at
 **http://localhost:8012/view?mode=adapt**.
 
+<iframe class="demo" src="_static/view.html?demo&mode=room&hand=right&robot" title="The ADAPT hand at your wrist, in the room" loading="lazy"></iframe>
+
+In **Room**, with **Robot** on, the amber ADAPT hand is where the robot goes: at your wrist, its
+own wrist straight. While `metaquest-teleop` runs it is what the robot gets, so it holds still
+while you pinch your left hand. The terminal shows the same ADAPT hand, in yellow, next to yours.
+
 ## In Python
 
 ```python
@@ -31,8 +37,8 @@ with QuestHands() as quest:
         wrist = adapt.wrist_pose(hand)     # where your wrist is, and how it faces
 ```
 
-The 13 motors leave the ADAPT wrist out: it stays at (0, 0). Use `joints` for a controller in
-joint space, such as VMC, and `motors` as targets for a PID on the motors.
+Use `joints` for a controller in joint space, such as VMC, and `motors` as targets for a PID on
+the motors. The ADAPT wrist stays at (0, 0): [below](#the-wrist).
 
 ## With the gestures and ROS 2
 
@@ -93,3 +99,8 @@ with the axes of the ADAPT hand:
 - **−x** towards the thumb.
 
 A robot arm that puts the ADAPT hand's base there makes it face the way your hand does.
+
+The ADAPT hand's own wrist never bends: it stays at **(0, 0)**. Its two wrist motors (13 and 14
+on its bus, `adapt.WRIST_MOTORS`) hold still there, under a PID, as in VirtualModelControl; the
+arm turns the hand instead. `/metaquest/adapt/motors` ends with these two motors at 0, so one
+PID over every motor it lists also holds the wrist.

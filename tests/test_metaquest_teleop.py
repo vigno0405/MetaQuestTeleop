@@ -258,6 +258,92 @@ def test_the_3d_view_receives_frames_and_status_with_only_the_right_hand():
     assert len(frames[-1]["right"]["joints"]) == 25
     assert set(frames[-1]["right"]["angles"]) == set(ANGLE_NAMES)
     assert any(s["page"] and s["session"] == "started" and s["mode"] == "fake" for s in statuses)
+    assert not any("robot" in m for m in messages)  # no teleoperation, no robot to draw
+
+
+def test_the_3d_view_gets_what_the_robot_gets():
+    import aiohttp
+
+    from metaquest_teleop import Teleop, adapt
+
+    port = _free_port()
+
+    async def view(seconds):
+        messages = []
+        async with aiohttp.ClientSession() as session, \
+                session.ws_connect(f"ws://127.0.0.1:{port}/view/ws") as ws:
+            headset = asyncio.ensure_future(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=seconds))
+            loop = asyncio.get_running_loop()
+            end = loop.time() + seconds + 0.3
+            while loop.time() < end:
+                try:
+                    msg = await ws.receive(timeout=end - loop.time())
+                except asyncio.TimeoutError:
+                    break
+                if msg.type != aiohttp.WSMsgType.TEXT:
+                    break
+                messages.append(json.loads(msg.data))
+            await headset
+        return messages
+
+    with QuestHands(port, adb=False) as quest:
+        Teleop(quest)
+        messages = asyncio.run(view(1.0))
+    moving = [m for m in messages if m.get("robot") and not m["robot"]["hold"] and m.get("frame")]
+    assert len(moving) > 10
+    low, high = np.array([adapt.JOINT_LIMITS[j] for j in adapt.JOINTS]).T
+    for m in moving:
+        robot = m["robot"]
+        assert robot["adapt"] and len(robot["wrist"]) == 7 and len(robot["joints"]) == 20
+        assert np.all((low - 1e-9 <= robot["joints"]) & (np.array(robot["joints"]) <= high + 1e-9))
+        # Nothing held it yet, so the robot's wrist is where yours is.
+        assert np.allclose(robot["wrist"][:3], m["frame"]["right"]["joints"][0][:3])
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_the_3d_views_robot_in_the_room_is_where_python_puts_it(tmp_path):
+    from metaquest_teleop import adapt
+
+    html = VIEW.read_text(encoding="utf-8")
+    rng = np.random.default_rng(21)
+    hands = [synthetic_hand("right", _angles(rng), _pose(rng)) for _ in range(3)]
+    script = tmp_path / "robot.js"
+    script.write_text(html.split("// math-begin")[1].split("// math-end")[0] + f"""
+const hands = {json.dumps([np.hstack([h.positions, h.quaternions]).tolist() for h in hands])};
+const joints = {json.dumps([adapt.joint_angles(h).tolist() for h in hands])};
+process.stdout.write(JSON.stringify(hands.map((j, k) => adaptInRoom(adaptWrist(j[0]), joints[k]))));
+""", encoding="utf-8")
+    out = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True, check=True).stdout)
+    for hand, room in zip(hands, out):
+        pose = adapt.wrist_pose(hand)  # the ADAPT base there, its own wrist straight
+        assert np.allclose(room["wrist"], pose.position + pose.rotation @ adapt.PALM_ORIGIN, atol=1e-12)
+        for digit, points in adapt.positions(adapt.joint_angles(hand)).items():
+            assert np.allclose(room[digit], pose.position + points @ pose.rotation.T, atol=1e-12)
+
+
+def test_the_dashboard_shows_the_adapt_hand_next_to_yours():
+    from rich.console import Console
+
+    from metaquest_teleop import Teleop
+    from metaquest_teleop.dashboard import render
+
+    texts = {}
+    for use_adapt in (True, False):
+        port = _free_port()
+        with QuestHands(port, adb=False) as quest:
+            Teleop(quest, adapt=use_adapt)
+            headset = threading.Thread(target=lambda: asyncio.run(
+                stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=0.8)))
+            headset.start()
+            quest.wait(timeout=3.0)
+            time.sleep(0.2)
+            console = Console(width=160, record=True, file=io.StringIO())
+            console.print(render(quest, 160))
+            texts[use_adapt] = console.export_text()
+            headset.join(5.0)
+    assert "RIGHT" in texts[True] and "ADAPT" in texts[True] and "moving" in texts[True]
+    assert "CMC1" in texts[True] and "PIP" in texts[True] and "fixed: a PID holds it" in texts[True]
+    assert "RIGHT" in texts[False] and "CMC1" not in texts[False] and "PID" not in texts[False]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
@@ -639,8 +725,9 @@ def test_ros_topics_carry_the_right_hand_and_the_adapt_hand(through):
     low, high = np.array([adapt.JOINT_LIMITS[j] for j in adapt.JOINTS]).T
     assert np.all((low - 1e-9 <= adapt_joints.position) & (np.array(adapt_joints.position) <= high + 1e-9))
     motors = got["/metaquest/adapt/motors"]
-    assert list(motors.name) == list(adapt.MOTORS)
-    assert np.allclose(motors.position, adapt.motor_angles(np.array(adapt_joints.position)))
+    assert list(motors.name) == list(adapt.MOTORS + adapt.WRIST_MOTORS)
+    assert np.allclose(motors.position[:13], adapt.motor_angles(np.array(adapt_joints.position)))
+    assert list(motors.position[13:]) == [0.0, 0.0]  # the wrist stays at 0, 0
     assert frame.right is not None and frame.left is None
     assert first["/metaquest/teleop/hold"].data is True  # before the first frame: hold
     assert first["/metaquest/teleop/state"].data == "no frames yet"

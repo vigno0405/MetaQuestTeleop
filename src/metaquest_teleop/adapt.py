@@ -11,6 +11,9 @@ joints spread, MCP, PIP and DIP. Its geometry, joint ranges, motor order and tra
 those of ``virtualmodelcontrol.robots.adapt``. Its base frame: +z towards the fingertips, +y on
 the palm side, the thumb towards -x. Flexion is positive; a finger's spread is positive towards
 the pinky.
+
+Its own wrist stays straight, at 0, 0 (:data:`WRIST_MOTORS`): the arm moves and turns the hand,
+with its base at :func:`wrist_pose`.
 """
 
 from __future__ import annotations
@@ -36,6 +39,12 @@ MOTORS = (
     "index_MCP", "index_PIP", "middle_MCP", "middle_PIP",
     "ring_MCP", "ring_PIP", "pinky_MCP", "pinky_PIP",
 )  # fmt: skip
+
+#: The ADAPT hand's two wrist motors (13 and 14 on its bus), and where they stay: at 0, 0, held by
+#: a PID (position control), as in ``virtualmodelcontrol``. The wrist never bends: the arm turns
+#: the hand instead.
+WRIST_MOTORS = ("wrist_yaw", "wrist_pitch")
+WRIST_ANGLES = (0.0, 0.0)
 
 #: The range of each joint, (low, high) in radians.
 JOINT_LIMITS = {
