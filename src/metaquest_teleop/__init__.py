@@ -6,4 +6,4 @@ from .teleop import Command, Teleop
 from . import adapt  # noqa: E402 -- the ADAPT hand, as metaquest_teleop.adapt
 
 __all__ = ["ANGLE_NAMES", "DEFAULT_PORT", "FINGERS", "JOINTS", "Command", "Frame", "Hand", "Pose", "QuestHands", "Teleop"]
-__version__ = "0.5.0"
+__version__ = "0.5.1"

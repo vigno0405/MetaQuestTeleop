@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 (2026-11-16)
 
 - `metaquest-teleop --print_joints` prints all your joint angles and, under them, the ADAPT
   hand's as the robot gets them (they hold still while the robot holds); with `--no-adapt`,
