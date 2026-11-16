@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.2 (2026-11-16)
 
 - Restart `metaquest-teleop` while the headset streams and it goes on without pressing Start
   again. The dashboard and the 3D view used to say "press Start" then; now they say
