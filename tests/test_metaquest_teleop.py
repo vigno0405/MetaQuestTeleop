@@ -406,3 +406,22 @@ def test_the_page_draws_before_asking_for_a_higher_frame_rate():
     start = html.index("session.requestAnimationFrame(onFrame);")
     assert "await session.updateTargetFrameRate" not in html
     assert html.index("session.updateTargetFrameRate(") > start
+
+
+def test_a_frame_rate_change_keeps_the_session_started():
+    import aiohttp
+
+    port = _free_port()
+    with QuestHands(port, adb=False) as quest:
+        async def headset():
+            async with aiohttp.ClientSession() as session, session.ws_connect(f"ws://127.0.0.1:{port}/ws") as ws:
+                await ws.send_str(json.dumps({"session": "started", "mode": "immersive-ar", "fps": None}))
+                await ws.send_str(json.dumps({"session": "framerate", "fps": 120}))
+                for _ in range(50):
+                    if quest.headset.get("fps") == 120:
+                        return dict(quest.headset), [text for _, text in quest.events]
+                    await asyncio.sleep(0.02)
+
+        info, events = asyncio.run(headset())
+    assert info["session"] == "started" and info["mode"] == "immersive-ar" and info["fps"] == 120
+    assert "streaming started" in events and "frame rate now 120 Hz" in events

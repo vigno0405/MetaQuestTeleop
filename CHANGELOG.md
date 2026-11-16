@@ -5,6 +5,8 @@
 - Fix a black screen in the headset after Start: the page waited for the higher frame rate
   before drawing its first frame, and on the Quest that change only happens once frames are
   drawn. It now draws first and asks for the frame rate without waiting.
+- After a frame-rate change the dashboard said "page open: press Start" while streaming: the
+  session now stays "started", with the new rate.
 
 ## 0.4.0 (2026-11-16)
 

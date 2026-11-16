@@ -356,13 +356,14 @@ class QuestHands:
             self.headset.update(msg["hello"])
         if "session" in msg:
             state = msg.pop("session")
-            self.headset.update(msg, session=state)
-            if state == "started":
-                self._event(f"streaming started, {msg.get('fps')} Hz")
-            elif state == "framerate":
+            if state == "framerate":  # the session goes on, at a new rate
+                self.headset["fps"] = msg.get("fps")
                 self._event(f"frame rate now {msg.get('fps')} Hz")
             else:
-                self._event("streaming stopped")
+                self.headset.update(msg, session=state)
+                fps = msg.get("fps")
+                self._event(("streaming started" + (f", {fps} Hz" if fps else "")) if state == "started"
+                            else "streaming stopped")
         if "stats" in msg:
             self.headset["stats"] = msg["stats"]
         if "error" in msg:
