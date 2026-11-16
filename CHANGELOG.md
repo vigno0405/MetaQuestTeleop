@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 (2026-11-16)
+
+- Fix a black screen in the headset after Start: the page waited for the higher frame rate
+  before drawing its first frame, and on the Quest that change only happens once frames are
+  drawn. It now draws first and asks for the frame rate without waiting.
+
 ## 0.4.0 (2026-11-16)
 
 - The right hand only, by default: `QuestHands(hands="right")`, `metaquest-teleop` and

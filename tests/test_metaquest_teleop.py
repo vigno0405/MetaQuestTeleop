@@ -397,3 +397,12 @@ def test_hands_must_be_right_left_or_both():
     with pytest.raises(ValueError):
         QuestHands(hands="two")
     assert QuestHands().hands == "right"
+
+
+def test_the_page_draws_before_asking_for_a_higher_frame_rate():
+    # On the Quest a new frame rate takes effect on a later frame: waiting for it before the
+    # first frame never ends, and the headset shows black.
+    html = PAGE.read_text(encoding="utf-8")
+    start = html.index("session.requestAnimationFrame(onFrame);")
+    assert "await session.updateTargetFrameRate" not in html
+    assert html.index("session.updateTargetFrameRate(") > start

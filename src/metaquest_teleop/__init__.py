@@ -5,4 +5,4 @@ from .server import DEFAULT_PORT, QuestHands
 from . import adapt  # noqa: E402 -- the ADAPT hand, as metaquest_teleop.adapt
 
 __all__ = ["ANGLE_NAMES", "DEFAULT_PORT", "FINGERS", "JOINTS", "Frame", "Hand", "Pose", "QuestHands"]
-__version__ = "0.4.0"
+__version__ = "0.4.1"

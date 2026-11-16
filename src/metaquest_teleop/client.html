@@ -151,17 +151,18 @@ startBtn.addEventListener("click", async () => {
     }
 
     const rates = session.supportedFrameRates ? Array.from(session.supportedFrameRates) : [];
-    if (rates.length && session.updateTargetFrameRate) {
-      try { await session.updateTargetFrameRate(Math.max(...rates)); } catch { /* keep the default */ }
-    }
-    const fps = session.frameRate || (rates.length ? Math.max(...rates) : null);
 
     session.addEventListener("end", onEnd);
     session.addEventListener("frameratechange", () => send({ session: "framerate", fps: session.frameRate }));
     hud.style.display = "block";
     setStatus("Streaming. Press the Meta button to stop.", "ok");
-    send({ session: "started", mode, space, fps, rates });
+    send({ session: "started", mode, space, fps: session.frameRate || null, rates });
     session.requestAnimationFrame(onFrame);
+    // Then ask for the highest frame rate, without waiting: the headset applies it on a later
+    // frame, so waiting for it before the first frame waits forever (a black screen).
+    if (rates.length && session.updateTargetFrameRate) {
+      session.updateTargetFrameRate(Math.max(...rates)).catch(() => { /* keep the default */ });
+    }
   } catch (e) {
     if (session) { try { await session.end(); } catch { /* already ended */ } }
     session = null;
