@@ -125,7 +125,7 @@
   </div>
   <div class="seg" data-key="show" id="show-seg">
     <button data-value="hand" title="Your hands, where they are">Your hand</button>
-    <button data-value="adapt" title="The ADAPT hand alone, where the robot goes: at your wrist, its own wrist straight (0, 0); still while the robot holds">ADAPT hand</button>
+    <button data-value="adapt" title="The ADAPT hand for your hand, instead of it: at your wrist, its own wrist straight (0, 0)">ADAPT hand</button>
   </div>
   <div class="seg"><button id="reset" title="Back to the starting viewpoint (or double-click)">Reset view</button></div>
 </div>
@@ -516,7 +516,6 @@ if (DEMO) document.body.classList.add("demo");
 
 // ------------------------------------------------------------------------------- data
 let frame = null, status = null, linkUp = false, lastFrameAt = -Infinity, everFrame = false;
-let robotCommand = null;  // what the teleoperation commands: hold, reason, wrist, joints
 let trail = [];  // [time ms, wrist position] of the selected hand
 
 function connect() {
@@ -525,7 +524,6 @@ function connect() {
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.status) status = msg.status;
-    if ("robot" in msg) robotCommand = msg.robot;
     if (msg.frame) {
       frame = msg.frame;
       lastFrameAt = performance.now();
@@ -716,14 +714,14 @@ function draw() {
   trail = trail.filter(([t]) => now - t < TRAIL_S * 1000);
 
   if (state.mode === "room") {
-    const robot = state.show === "adapt" ? robotNow() : null;  // the ADAPT hand, instead of yours
+    const robot = state.show === "adapt" ? adaptNow() : null;  // the ADAPT hand, instead of yours
     const focus = state.show === "adapt" ? robot && robotPalm(robot) : hand && palm(hand);
     if (state.follow && focus && alive) view.target = lerp(view.target, focus, 0.12);
     const cam = camera(view, width, height);
     addGrid(cam);
     if (state.axes) addAxes(cam, [0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 0.25, ["x", "y", "z"]);
     if (frame && frame.head) addHead(cam, frame.head);
-    if (robot) addRobot(cam, robot, (alive ? 1 : 0.3) * (robot.hold ? 0.55 : 1));
+    if (robot) addRobot(cam, robot, alive ? 1 : 0.3);
     for (const side of state.show === "adapt" ? [] : ["left", "right"]) {
       const h = frame && frame[side];
       if (!h) continue;
@@ -758,16 +756,11 @@ function draw() {
   requestAnimationFrame(draw);
 }
 
-// The ADAPT hand in the room, as the robot gets it: where the teleoperation puts it, still while
-// the robot holds (from metaquest-teleop); in the demo, at your right hand as it is.
-function robotNow() {
-  if (robotCommand) {
-    const c = robotCommand;
-    return c.adapt && c.wrist && c.joints ? { wrist: c.wrist, joints: c.joints, hold: c.hold } : null;
-  }
-  const hand = DEMO && frame && frame.right;
-  if (!hand) return null;
-  return { wrist: adaptWrist(hand.joints[0]), joints: adaptJoints(handAngles(hand), hand.joints), hold: false };
+// The ADAPT hand for your hand as it is, in the room: its base at your wrist, with the ADAPT axes,
+// and the pose it can take for yours (as in the ADAPT view and the dashboard).
+function adaptNow() {
+  const hand = frame && frame[state.side];
+  return hand ? { wrist: adaptWrist(hand.joints[0]), joints: adaptJoints(handAngles(hand), hand.joints) } : null;
 }
 
 const robotPalm = (robot) => add(robot.wrist.slice(0, 3), matVec(quatToMat(robot.wrist.slice(3, 7)), [0, 0, 0.05]));
@@ -775,15 +768,15 @@ const robotPalm = (robot) => add(robot.wrist.slice(0, 3), matVec(quatToMat(robot
 // Where the trail goes: the ADAPT hand's wrist when it is shown in Room, else your wrist.
 function trailPoint() {
   if (state.mode === "room" && state.show === "adapt") {
-    const robot = robotNow();
+    const robot = adaptNow();
     return robot ? robot.wrist.slice(0, 3) : null;
   }
   const hand = frame && frame[state.side];
   return hand ? hand.joints[0].slice(0, 3) : null;
 }
 
-// The ADAPT hand where the robot goes, drawn as your hand is: its forearm straight on (its wrist
-// stays at 0, 0), its fingers where its motors put them.
+// The ADAPT hand drawn as your hand is: its forearm straight on (its wrist stays at 0, 0), its
+// fingers where its motors put them.
 function addRobot(cam, robot, alpha) {
   const motors = adaptMotors(robot.joints);
   const pts = adaptInRoom(robot.wrist, ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0)));
@@ -797,7 +790,7 @@ function addRobot(cam, robot, alpha) {
     q.forEach((p, k) => addDot(cam, p, k === q.length - 1 ? 0.0075 : 0.0055, COLORS[f], alpha));
   });
   addDot(cam, pts.wrist, 0.011, WRIST_COLOR, alpha);
-  addLabel(cam, add(o, matVec(r, [0, -0.03, 0.21])), robot.hold ? "ADAPT · holding its last pose" : "ADAPT", WRIST_COLOR, alpha);
+  addLabel(cam, add(o, matVec(r, [0, -0.03, 0.21])), "ADAPT", WRIST_COLOR, alpha);
   if (state.axes) addAxes(cam, o, r, 0.06, null, alpha);
 }
 
@@ -931,8 +924,8 @@ function updatePanels() {
                         teleop === "moving" ? "moving" : `holding: ${teleop}`);
   }
 
-  $("show-seg").hidden = state.mode !== "room" || !(DEMO || (robotCommand && robotCommand.adapt));
-  if (robotCommand && !robotCommand.adapt && state.show === "adapt") {  // --no-adapt: no ADAPT hand to show
+  $("show-seg").hidden = state.mode !== "room" || !(DEMO || (status && status.adapt));
+  if (!DEMO && status && status.adapt === false && state.show === "adapt") {  // --no-adapt: no ADAPT hand
     state.show = "hand";
     syncControls();
   }
@@ -953,13 +946,12 @@ function updatePanels() {
     updateAdaptPanel(hand ? adaptJoints(handAngles(hand), hand.joints) : null,
                      hand ? adaptJoints(handAngles(hand), hand.joints, false, ADAPT_THUMB_REST, false) : null);
   }
-  const robot = showRobot ? robotNow() : null;
-  if (showRobot) updateAdaptPanel(robot ? robot.joints : null);
-  $("hand-title").innerHTML = showRobot
-    ? (robot ? (robot.hold ? `ADAPT <span style="color: var(--warn)">○ holding its last pose</span>`
-                           : `ADAPT <span style="color: var(--ok)">● moving</span>`)
-             : "ADAPT <span>○ waiting for both hands</span>")
-    : hand ? `${side} <span style="color: var(--ok)">● tracked</span>` : `${side} <span>○ not tracked</span>`;
+  if (showRobot) {
+    updateAdaptPanel(hand ? adaptJoints(handAngles(hand), hand.joints) : null,
+                     hand ? adaptJoints(handAngles(hand), hand.joints, false, ADAPT_THUMB_REST, false) : null);
+  }
+  $("hand-title").innerHTML = `${showRobot ? "ADAPT" : side} ` +
+    (hand ? `<span style="color: var(--ok)">● tracked</span>` : `<span>○ not tracked</span>`);
   if (hand) {
     const w = hand.wrist.position;
     $("hand-wrist").textContent = `wrist  x ${signed(w[0])}  y ${signed(w[1])}  z ${signed(w[2])} m`;

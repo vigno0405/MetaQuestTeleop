@@ -59,13 +59,12 @@ def joints_line(side: str, hand: Hand | None, which: str) -> str:
     return _angles_line(side, np.degrees(hand.angles), FINGERS)
 
 
-def adapt_line(teleop: Teleop) -> str:
-    """The ADAPT hand's line of ``--print_joints``: its joints as the robot gets them, which hold
-    still while the robot holds (as on ``/metaquest/adapt/joint_states``)."""
-    joints = teleop.command().joints
-    if joints is None:
-        return "ADAPT  waiting for both hands"
-    return _angles_line("ADAPT", np.degrees(joints).reshape(5, 4), adapt.DIGITS)
+def adapt_line(hand: Hand | None) -> str:
+    """The ADAPT hand's line of ``--print_joints``: its joints for your hand as it is, the pose it
+    can take. (The robot's state ends the line; what it gets is on ``/metaquest/adapt/...``.)"""
+    if hand is None:
+        return "ADAPT  not tracked"
+    return _angles_line("ADAPT", np.degrees(adapt.joint_angles(hand)).reshape(5, 4), adapt.DIGITS)
 
 
 def robot_state(teleop: Teleop) -> str:
@@ -91,7 +90,7 @@ def print_joints(quest: QuestHands, teleop: Teleop) -> None:
             continue
         lines = [joints_line(side, frame.hand(side), "hand") for side in sides]
         if teleop.adapt:
-            lines.append(adapt_line(teleop))
+            lines.append(adapt_line(frame.hand(teleop.drive)))
         lines[-1] += f"  | {robot_state(teleop)}"
         for line in lines:
             print(f"{now}  {line}", flush=True)

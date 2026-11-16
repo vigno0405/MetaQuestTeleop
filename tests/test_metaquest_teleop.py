@@ -258,46 +258,28 @@ def test_the_3d_view_receives_frames_and_status_with_only_the_right_hand():
     assert len(frames[-1]["right"]["joints"]) == 25
     assert set(frames[-1]["right"]["angles"]) == set(ANGLE_NAMES)
     assert any(s["page"] and s["session"] == "started" and s["mode"] == "fake" for s in statuses)
-    assert not any("robot" in m for m in messages)  # no teleoperation, no robot to draw
+    assert all(s["adapt"] is None for s in statuses)  # no teleoperation: no ADAPT hand to show
 
 
-def test_the_3d_view_gets_what_the_robot_gets():
+def test_the_3d_view_knows_whether_the_adapt_hand_is_on():
     import aiohttp
 
-    from metaquest_teleop import Teleop, adapt
+    from metaquest_teleop import Teleop
 
-    port = _free_port()
+    async def statuses(port):
+        async with aiohttp.ClientSession() as session, session.ws_connect(f"ws://127.0.0.1:{port}/view/ws") as ws:
+            while True:
+                message = json.loads((await ws.receive(timeout=3.0)).data)
+                if "status" in message:
+                    return message["status"]
 
-    async def view(seconds):
-        messages = []
-        async with aiohttp.ClientSession() as session, \
-                session.ws_connect(f"ws://127.0.0.1:{port}/view/ws") as ws:
-            headset = asyncio.ensure_future(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=seconds))
-            loop = asyncio.get_running_loop()
-            end = loop.time() + seconds + 0.3
-            while loop.time() < end:
-                try:
-                    msg = await ws.receive(timeout=end - loop.time())
-                except asyncio.TimeoutError:
-                    break
-                if msg.type != aiohttp.WSMsgType.TEXT:
-                    break
-                messages.append(json.loads(msg.data))
-            await headset
-        return messages
-
-    with QuestHands(port, adb=False) as quest:
-        Teleop(quest)
-        messages = asyncio.run(view(1.0))
-    moving = [m for m in messages if m.get("robot") and not m["robot"]["hold"] and m.get("frame")]
-    assert len(moving) > 10
-    low, high = np.array([adapt.JOINT_LIMITS[j] for j in adapt.JOINTS]).T
-    for m in moving:
-        robot = m["robot"]
-        assert robot["adapt"] and len(robot["wrist"]) == 7 and len(robot["joints"]) == 20
-        assert np.all((low - 1e-9 <= robot["joints"]) & (np.array(robot["joints"]) <= high + 1e-9))
-        # Nothing held it yet, so the robot's wrist is where yours is.
-        assert np.allclose(robot["wrist"][:3], m["frame"]["right"]["joints"][0][:3])
+    seen = {}
+    for use_adapt in (True, False):
+        port = _free_port()
+        with QuestHands(port, adb=False) as quest:
+            Teleop(quest, adapt=use_adapt)
+            seen[use_adapt] = asyncio.run(statuses(port))["adapt"]
+    assert seen == {True: True, False: False}
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
@@ -346,24 +328,30 @@ def test_the_dashboard_shows_the_adapt_hand_next_to_yours():
     assert "RIGHT" in texts[False] and "CMC1" not in texts[False] and "PID" not in texts[False]
 
 
-def test_the_dashboards_adapt_hand_says_when_it_holds_its_last_pose():
+def test_the_dashboards_adapt_hand_follows_your_hand():
+    # The ADAPT panel maps your hand as it is: it does not freeze while the robot holds (when you
+    # test with your right hand only, say), and it is not tracked when your hand is not.
     from rich.console import Console
 
     from metaquest_teleop import Teleop
     from metaquest_teleop.dashboard import render
 
-    port = _free_port()
-    with QuestHands(port, adb=False) as quest:
-        teleop = Teleop(quest)
-        asyncio.run(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=0.5))  # both hands: moving
-        asyncio.run(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=0.3, hands=("right",)))  # left gone
+    def screen(quest):
         console = Console(width=160, record=True, file=io.StringIO())
         console.print(render(quest, 160))
-        text = console.export_text()
-        command = teleop.command()
-    assert command.hold and command.reason == "left hand not seen" and command.joints is not None
-    assert "holding its last pose: left hand not seen" in text
-    assert "CMC1" in text and "PIP" in text  # the pose it holds, greyed
+        return console.export_text()
+
+    port = _free_port()
+    with QuestHands(port, adb=False, hands="both") as quest:
+        teleop = Teleop(quest)
+        asyncio.run(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=0.3, hands=("right",)))  # no left hand
+        right_only, holding = screen(quest), teleop.command()
+        asyncio.run(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=0.3, hands=("left",)))  # no right hand
+        left_only = screen(quest)
+    assert holding.hold and holding.reason == "left hand not seen"
+    assert "holding: left hand not seen" in right_only  # the robot line says it holds...
+    assert "ADAPT  ● tracked" in right_only and "CMC1" in right_only  # ...the ADAPT hand follows yours
+    assert "ADAPT  ○" in left_only and "CMC1" not in left_only  # no right hand, no ADAPT hand
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")

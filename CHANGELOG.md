@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3 (2026-11-16)
+
+- The ADAPT hand on the dashboard, in `--print_joints` and in the 3D view's Room follows your hand
+  as it is, as in the ADAPT view. It no longer freezes while the robot holds: testing with your
+  right hand only, the robot always holds (left hand not seen), and the ADAPT hand stood still
+  at an old pose. It is not tracked when your hand is not. Whether the robot moves or holds stays
+  on the robot line, and ROS 2 still carries what the robot gets.
+
 ## 0.6.2 (2026-11-16)
 
 - 3D view, Room: **Your hand** (the default) or **ADAPT hand**, one at a time: the ADAPT hand

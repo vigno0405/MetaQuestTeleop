@@ -44,9 +44,9 @@ Some things to try:
 - While `metaquest-teleop` runs, the **robot** line says whether a robot would move or hold
   ([teleoperation](teleop.md)).
 - In **Room**, **Your hand** (the default) or **ADAPT hand**: the ADAPT hand instead of yours,
-  where the robot goes. It sits at your wrist with its own wrist straight, and holds still,
-  faded, while the robot holds; the panel then gives its joints and motors
-  ([ADAPT Hand](adapt.md)).
+  for your hand as it is, at your wrist with its own wrist straight; the panel then gives its
+  joints and motors ([ADAPT Hand](adapt.md)). Whether the robot moves or holds is on the
+  **robot** line.
 - With one hand streamed (the default, the right one), that is the hand shown; with
   `--hands both`, pick the one to follow.
 

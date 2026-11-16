@@ -18,10 +18,10 @@ angles are held at the robot's limit. While `metaquest-teleop` runs, the same vi
 
 <iframe class="demo" src="_static/view.html?demo&mode=room&hand=right&show=adapt" title="The ADAPT hand where the robot goes, in the room" loading="lazy"></iframe>
 
-In **Room**, **ADAPT hand** shows the ADAPT hand instead of yours, where the robot goes: at your
-wrist, its own wrist straight. While `metaquest-teleop` runs it is what the robot gets, so it
-holds still, faded, while you pinch your left hand. The terminal shows the same ADAPT hand, in
-yellow, next to yours, greyed while it holds its last pose.
+In **Room**, **ADAPT hand** shows the ADAPT hand instead of yours, for your hand as it is: at
+your wrist, its own wrist straight. The terminal shows the same ADAPT hand, in yellow, next to
+yours. Both follow your hand also while the robot holds (its **robot** line says so); on ROS 2,
+`/metaquest/adapt/...` carries what the robot gets, which holds still.
 
 ## In Python
 
