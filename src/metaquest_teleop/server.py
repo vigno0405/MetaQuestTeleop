@@ -31,7 +31,8 @@ def adb_reverse(port: int) -> tuple[bool, str]:
     """Make the headset's localhost:port reach this computer over USB. Returns (ok, status)."""
     adb = shutil.which("adb")
     if adb is None:
-        return False, "adb not found: install Android platform-tools (see README)"
+        return False, ("adb not found: install it (Ubuntu: sudo apt install adb; others: "
+                       "https://vigno0405.github.io/MetaQuestTeleop/start.html)")
     try:
         out = subprocess.run([adb, "devices"], capture_output=True, text=True, timeout=5).stdout
         devices = [line.split() for line in out.splitlines()[1:] if len(line.split()) > 1]
