@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1 (2026-11-16)
+
+- The ADAPT thumb's IP turns about twice as far as yours: your 0 to 40° gives its whole range,
+  0 to 69° (`adapt.HUMAN_RANGES["thumb_IP"] = (0, 40)`; it was 0 to 80°).
+
 ## 0.10.0 (2026-11-16)
 
 - The ADAPT thumb follows yours joint for joint, in the fit too: its CMC1, MCP and IP through

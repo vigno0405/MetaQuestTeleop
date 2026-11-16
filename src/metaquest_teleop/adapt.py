@@ -69,7 +69,7 @@ JOINT_LIMITS = {
 #: goes the other way round), the thumb's CMC1 is read as the ADAPT's is built (see
 #: :func:`joint_angles`). The thumb's CMC2 is not here: :data:`CMC2_POSES`.
 HUMAN_RANGES = {
-    "thumb_CMC1": (5, 95), "thumb_MCP": (0, 65), "thumb_IP": (0, 80),
+    "thumb_CMC1": (5, 95), "thumb_MCP": (0, 65), "thumb_IP": (0, 40),
     "index_spread": (20, 0), "index_MCP": (0, 90), "index_PIP": (0, 90), "index_DIP": (0, 60),
     "middle_spread": (0, 0), "middle_MCP": (0, 90), "middle_PIP": (0, 90), "middle_DIP": (0, 60),
     "ring_spread": (0, -15), "ring_MCP": (0, 90), "ring_PIP": (0, 90), "ring_DIP": (0, 60),

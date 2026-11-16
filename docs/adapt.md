@@ -88,7 +88,7 @@ between. The fit starts from this pose.
 |---|---|---|---|
 | thumb CMC1 | your thumb's first bone, turned about the hand's long axis from sideways towards the palm's front | 5 to 95 | 0 to 86 |
 | thumb CMC2 | your thumb's base and spread: [below](#the-thumbs-cmc2) | | −70 to 30 |
-| thumb MCP, IP | your thumb's bend at its middle and tip joints | 0 to 65, 0 to 80 | 0 to 86, 0 to 69 |
+| thumb MCP, IP | your thumb's bend at its middle and tip joints | 0 to 65, 0 to 40 | 0 to 86, 0 to 69 |
 | each finger's MCP | your bend at the base | 0 to 90 | 0 to 86 |
 | each finger's PIP, DIP | your bend at the middle and tip joints | 0 to 90, 0 to 60 | 0 to 69 |
 | index spread | your index spread towards the thumb | 20 to 0 | −17 to 0 |
@@ -96,8 +96,9 @@ between. The fit starts from this pose.
 
 The ranges are typical ones, set so that, as with the real hand's poses of HumanManipulationVMC
 (Santello et al., 1998): your **open hand gives home**, all zeros; a **power grasp gives PC1**
-(thumb CMC1 65°, MCP 50°, IP 40°; fingers 55° and 65°); a **pinch gives PC2** (thumb 50°, MCP 35°,
-IP 25°; index 25° and 40°). To fit your hand, change `adapt.HUMAN_RANGES`:
+(thumb CMC1 65°, MCP 50°; fingers 55° and 65°); a **pinch gives PC2** (thumb 50°, MCP 35°; index
+25° and 40°). The thumb's IP turns about twice as far as yours: your 0 to 40° is all of its range.
+To fit your hand, change `adapt.HUMAN_RANGES`:
 
 ```python
 from metaquest_teleop import adapt
