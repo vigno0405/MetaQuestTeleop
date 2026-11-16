@@ -622,7 +622,6 @@ def test_the_command_stops_on_ctrl_c_and_on_request_with_ros(stop):
 
 @pytest.mark.parametrize("no_adapt", [False, True])
 def test_print_joints_prints_all_your_joints_and_the_adapt_ones_unless_turned_off(no_adapt):
-    import signal
     import sys
 
     port = _free_port()
@@ -646,7 +645,7 @@ def test_print_joints_prints_all_your_joints_and_the_adapt_ones_unless_turned_of
             if sum(" right " in f" {line} " for line in lines) >= 5:
                 break
         headset.join(5.0)  # let the fake headset finish before stopping the command
-        process.send_signal(signal.SIGINT)
+        process.terminate()  # the lines are in; terminate works everywhere, Ctrl-C not on Windows
         process.communicate(timeout=10)
     finally:
         guard.cancel()
