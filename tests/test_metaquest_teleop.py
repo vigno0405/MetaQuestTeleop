@@ -399,7 +399,8 @@ def test_adapt_geometry_is_the_one_of_virtualmodelcontrol():
     assert np.allclose(adapt.COUPLING, lib.hand_coupling(), atol=1e-15)
     assert adapt.MOTORS == lib.HAND_MOTORS
     assert adapt.JOINT_LIMITS == {k: tuple(v) for k, v in lib.HAND_JOINT_LIMITS.items()}
-    kin = vmc.Kinematics(lib.hand())
+    # The thumb tip along its last bone (-x), as HumanManipulationVMC draws it; the rest as is.
+    kin = vmc.Kinematics(lib.hand(tip_offsets={"thumb": tuple(adapt.TIP_OFFSETS["thumb"])}))
     for q in np.random.default_rng(8).uniform(-1, 1, (10, 13)):
         ours = adapt.positions(adapt.COUPLING @ q)
         for digit in adapt.DIGITS:

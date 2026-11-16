@@ -116,7 +116,11 @@ DIGIT_JOINTS = {
         ((0.009309, 0.006254, 0.016559), (-0.859324, -0.064308, 0.507372)),
     ),
 }
-TIP_OFFSET = np.array([0.0, 0.0, 0.0175])  # from the last joint, in its frame
+#: Each fingertip from its last joint, in that joint's frame [m]: along the last bone, which runs
+#: along -x for the thumb (25 mm, as HumanManipulationVMC draws it) and along +z for the fingers.
+TIP_OFFSETS = {"thumb": np.array([-0.025, 0.0, 0.0]),
+               **{d: np.array([0.0, 0.0, 0.0175]) for d in ("index", "middle", "ring", "pinky")}}
+TIP_OFFSET = TIP_OFFSETS["index"]  # the fingers' tip
 
 # Transmissions: joint angle per motor angle.
 _FINGER_TRANSMISSIONS = {  # motor pulley, finger pulley, PIP cable constant [m]
@@ -262,6 +266,6 @@ def positions(joints) -> dict[str, np.ndarray]:
             p = p + r @ np.asarray(origin)
             points.append(p)
             r = r @ _rotation(axis, joints[4 * d + k])
-        points.append(p + r @ TIP_OFFSET)
+        points.append(p + r @ TIP_OFFSETS[digit])
         out[digit] = np.array(points)
     return out

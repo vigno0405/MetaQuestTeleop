@@ -331,7 +331,8 @@ const ADAPT_JOINTS = {
           [[0.014895, 0.010006, 0.026496], [-0.859324, -0.064308, 0.507372]],
           [[0.009309, 0.006254, 0.016559], [-0.859324, -0.064308, 0.507372]]],
 };
-const ADAPT_TIP = [0.0, 0.0, 0.0175];
+const ADAPT_TIP = [0.0, 0.0, 0.0175];        // a fingertip, along its last bone (+z), as adapt.TIP_OFFSETS
+const ADAPT_THUMB_TIP = [-0.025, 0.0, 0.0];   // the thumb's: its last bone runs along -x
 const ADAPT_LIMITS = [[0, 1.5], [-0.5, 0.5], [0, 1.5], [0, 1.2],
                       [-0.3, 0], [0, 1.5], [0, 1.2], [0, 1.2], [0, 0], [0, 1.5], [0, 1.2], [0, 1.2],
                       [0, 0.3], [0, 1.5], [0, 1.2], [0, 1.2], [0, 0.3], [0, 1.5], [0, 1.2], [0, 1.2]];
@@ -434,7 +435,7 @@ function adaptPositions(joints) {
       points.push(p);
       r = matMul(r, rotAxis(axis, joints[4 * d + k]));
     });
-    points.push(add(p, matVec(r, ADAPT_TIP)));
+    points.push(add(p, matVec(r, digit === "thumb" ? ADAPT_THUMB_TIP : ADAPT_TIP)));
     out[digit] = points;
   });
   return out;

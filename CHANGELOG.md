@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1 (2026-11-16)
+
+- The ADAPT thumb ends in its last bone: its tip 25 mm along it (-x), as HumanManipulationVMC
+  draws it (`adapt.TIP_OFFSETS`). It was 17.5 mm along +z, as for the fingers, so the drawn thumb
+  ended in a stub bent 90° towards the fingers.
+
 ## 0.7.0 (2026-11-16)
 
 - The ADAPT hand follows your hand joint for joint, your range of motion stretched onto its own
