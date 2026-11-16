@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0 (2026-11-16)
+
+- The ADAPT hand follows your hand joint for joint, your range of motion stretched onto its own
+  (`adapt.HUMAN_RANGES`, typical ranges you can change at any time): your open hand gives its
+  home (all zeros), a power grasp about PC1 and a pinch about PC2, the real hand's poses of
+  HumanManipulationVMC (Santello et al., 1998). Its thumb's CMC1 and CMC2 follow your thumb's
+  first bone, read as the ADAPT's gimbal turns its own. Before, the thumb stuck out sideways.
+- Removed: `adapt.THUMB_REST`, `joint_angles(..., thumb_rest=...)` and `adapt.thumb_cmc`.
+- The 3D view maps your hand with the same ranges as the library, also once you change them.
+
 ## 0.6.3 (2026-11-16)
 
 - The ADAPT hand on the dashboard, in `--print_joints` and in the 3D view's Room follows your hand

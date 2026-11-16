@@ -342,7 +342,14 @@ const ADAPT_FINGER_TRANSMISSIONS = {  // motor pulley, finger pulley, PIP cable 
 const ADAPT_THUMB_TRANSMISSION = { r_motor: 0.005, CMC1_pulley: 0.01346, CMC2_pulley: 0.00883,
                                    MCP_c: 0.00605, IP_c: 0.00577 };
 const ADAPT_SPREAD = { index: 1.0, middle: 0.0, ring: -1.0, pinky: -1.5 };
-const ADAPT_THUMB_REST = 65 * Math.PI / 180;  // CMC2 of a relaxed thumb, as adapt.THUMB_REST
+// Your range for each ADAPT joint, as adapt.HUMAN_RANGES: the angles of yours (degrees) that give
+// the low and the high end of its range, in the ADAPT joints' order.
+const ADAPT_HUMAN = [
+  [5, 95], [16, 74], [0, 65], [0, 80],
+  [20, 0], [0, 90], [0, 90], [0, 60], [0, 0], [0, 90], [0, 90], [0, 60],
+  [0, -15], [0, 90], [0, 90], [0, 60], [0, -25], [0, 90], [0, 90], [0, 60],
+];
+let adaptRanges = ADAPT_HUMAN;  // metaquest-teleop sends its own, which you may have changed
 const adaptClip = (joints) => joints.map((v, i) => Math.min(Math.max(v, ADAPT_LIMITS[i][0]), ADAPT_LIMITS[i][1]));
 
 // Joint angles = ADAPT_COUPLING (20 x 13) · motor angles.
@@ -380,48 +387,26 @@ const rotAxis = (axis, angle) => {
           [y * x * t + z * s, c + y * y * t, y * z * t - x * s],
           [z * x * t - y * s, z * y * t + x * s, c + z * z * t]];
 };
-const angleAbout = (w, p, q) => {
-  const u = sub(p, scale(w, dot(w, p))), v = sub(q, scale(w, dot(w, q)));
-  return Math.atan2(dot(w, cross(u, v)), dot(u, v));
-};
-
-// CMC1 and CMC2 that point the ADAPT thumb's metacarpal along `direction` (ADAPT base frame):
-// two rotations about crossing axes; of the two solutions, the one nearer the joints' mid-range.
-function adaptThumbCmc(direction) {
-  const w1 = norm(ADAPT_JOINTS.thumb[0][1]), w2 = norm(ADAPT_JOINTS.thumb[1][1]);
-  const p = norm(ADAPT_JOINTS.thumb[2][0]), q = norm(direction);
-  const c = dot(w1, w2), w12 = cross(w1, w2);
-  const alpha = (c * dot(w2, p) - dot(w1, q)) / (c * c - 1);
-  const beta = (c * dot(w1, q) - dot(w2, p)) / (c * c - 1);
-  const g2 = (1 - alpha * alpha - beta * beta - 2 * alpha * beta * c) / dot(w12, w12);
-  const [[lo1, hi1], [lo2, hi2]] = ADAPT_LIMITS;
-  let best = [0, 0], cost = Infinity;
-  for (const gamma of g2 > 0 ? [Math.sqrt(g2), -Math.sqrt(g2)] : [0]) {
-    const z = add(add(scale(w1, alpha), scale(w2, beta)), scale(w12, gamma));
-    const cmc1 = angleAbout(w1, z, q), cmc2 = angleAbout(w2, p, z);
-    const here = ((2 * cmc1 - lo1 - hi1) / (hi1 - lo1)) ** 2 + ((2 * cmc2 - lo2 - hi2) / (hi2 - lo2)) ** 2;
-    if (here < cost) { best = [cmc1, cmc2]; cost = here; }
-  }
-  return best;
-}
-
 // The 20 ADAPT joint angles for your hand: `angles` (5 rows of base, spread, middle, tip) and
-// `joints` (25 rows of x, y, z, qx, qy, qz, qw), as metaquest_teleop.adapt.joint_angles: the
-// closest pose the ADAPT hand can take (each DIP mimics its PIP, one motor spreads the fingers),
-// or with `coupled` false your angle for each joint, one by one.
-function adaptJoints(angles, joints, clip = true, thumbRest = ADAPT_THUMB_REST, coupled = true) {
+// `joints` (25 rows of x, y, z, qx, qy, qz, qw), as metaquest_teleop.adapt.joint_angles: each joint
+// follows yours, your range stretched onto its range; then the pose the ADAPT hand can take (each
+// DIP mimics its PIP, one motor spreads the fingers), unless `coupled` is false.
+function adaptJoints(angles, joints, clip = true, coupled = true) {
+  // Your thumb's first bone, in the ADAPT axes, read as the ADAPT's CMC joints turn theirs.
   const rw = quatToMat(joints[0].slice(3, 7));
-  const d = sub(joints[2].slice(0, 3), joints[1].slice(0, 3));
-  const local = [dot(column(rw, 0), d), dot(column(rw, 1), d), dot(column(rw, 2), d)];
-  const [cmc1, cmc2] = adaptThumbCmc([local[0], -local[1], -local[2]]);
-  const out = [cmc1, cmc2 - thumbRest, angles[0][2], angles[0][3]];
-  for (let f = 1; f < 5; f++) out.push(-angles[f][1], angles[f][0], angles[f][2], angles[f][3]);
-  let result = out;
+  const b = sub(joints[2].slice(0, 3), joints[1].slice(0, 3));
+  const d = norm([dot(column(rw, 0), b), -dot(column(rw, 1), b), -dot(column(rw, 2), b)]);
+  const yours = [Math.atan2(d[1], -d[0]), Math.asin(Math.min(Math.max(d[2], -1), 1)), angles[0][2], angles[0][3]];
+  for (let f = 1; f < 5; f++) yours.push(angles[f][1], angles[f][0], angles[f][2], angles[f][3]);
+  let out = yours.map((v, i) => {
+    const [lo, hi] = adaptRanges[i].map((x) => x * Math.PI / 180), [low, high] = ADAPT_LIMITS[i];
+    return hi === lo ? low : low + (v - lo) / (hi - lo) * (high - low);
+  });
   if (coupled) {
     const motors = adaptMotors(out, clip);
-    result = ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0));
+    out = ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0));
   }
-  return clip ? adaptClip(result) : result;  // coupled: only rounding to take off
+  return clip ? adaptClip(out) : out;  // coupled: only rounding to take off
 }
 
 // The 13 motor angles: the least-squares fit through the coupling, as adapt.motor_angles. Each
@@ -524,6 +509,7 @@ function connect() {
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.status) status = msg.status;
+    if (msg.status && msg.status.human_ranges) adaptRanges = msg.status.human_ranges;
     if (msg.frame) {
       frame = msg.frame;
       lastFrameAt = performance.now();
@@ -944,11 +930,11 @@ function updatePanels() {
   $("adapt-panel").hidden = !adaptShown;
   if (state.mode === "adapt") {
     updateAdaptPanel(hand ? adaptJoints(handAngles(hand), hand.joints) : null,
-                     hand ? adaptJoints(handAngles(hand), hand.joints, false, ADAPT_THUMB_REST, false) : null);
+                     hand ? adaptJoints(handAngles(hand), hand.joints, false, false) : null);
   }
   if (showRobot) {
     updateAdaptPanel(hand ? adaptJoints(handAngles(hand), hand.joints) : null,
-                     hand ? adaptJoints(handAngles(hand), hand.joints, false, ADAPT_THUMB_REST, false) : null);
+                     hand ? adaptJoints(handAngles(hand), hand.joints, false, false) : null);
   }
   $("hand-title").innerHTML = `${showRobot ? "ADAPT" : side} ` +
     (hand ? `<span style="color: var(--ok)">● tracked</span>` : `<span>○ not tracked</span>`);

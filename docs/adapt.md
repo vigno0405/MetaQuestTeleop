@@ -49,14 +49,36 @@ or while a hand is not seen ([teleoperation](teleop.md)). `--no-adapt` leaves th
 
 ## Joints: from your hand
 
-| ADAPT joint | From your hand |
-|---|---|
-| each finger's MCP | your bend at the base |
-| each finger's PIP and DIP | both the **mean** of your middle and tip bends: on the ADAPT hand the DIP mimics the PIP (below) |
-| each finger's spread | your sideways spread, with the opposite sign (the ADAPT hand counts towards the pinky); one motor spreads the fingers together (below) |
-| thumb MCP, IP | your thumb's bend at its middle and tip joints |
-| thumb CMC1 | the angle that points the robot's thumb where your thumb's first bone points |
-| thumb CMC2 | the same, measured from a relaxed thumb (below) |
+Each ADAPT joint follows the same joint of yours, your range of motion stretched onto its own:
+the angle of yours in the first column of `adapt.HUMAN_RANGES` gives its lowest angle, the one in
+the second its highest, linearly in between.
+
+| ADAPT joint | Follows | Your range (°) | Its range (°) |
+|---|---|---|---|
+| thumb CMC1 | your thumb's first bone, turned about the hand's long axis from sideways towards the palm's front | 5 to 95 | 0 to 86 |
+| thumb CMC2 | your thumb's first bone, pointing along the fingers | 16 to 74 | −29 to 29 |
+| thumb MCP, IP | your thumb's bend at its middle and tip joints | 0 to 65, 0 to 80 | 0 to 86, 0 to 69 |
+| each finger's MCP | your bend at the base | 0 to 90 | 0 to 86 |
+| each finger's PIP, DIP | your bend at the middle and tip joints | 0 to 90, 0 to 60 | 0 to 69 |
+| index spread | your index spread towards the thumb | 20 to 0 | −17 to 0 |
+| ring, pinky spread | your spread towards the pinky | 0 to 15, 0 to 25 | 0 to 17 |
+
+The ranges are typical ones, set so that, as with the real hand's poses of HumanManipulationVMC
+(Santello et al., 1998): your **open hand gives home**, all zeros; a **power grasp gives PC1**
+(thumb CMC1 65°, MCP 50°, IP 40°; fingers 55° and 65°); a **pinch gives PC2** (thumb 50°, MCP 35°,
+IP 25°; index 25° and 40°). To fit your hand, change `adapt.HUMAN_RANGES`:
+
+```python
+from metaquest_teleop import adapt
+
+adapt.HUMAN_RANGES["thumb_MCP"] = (0, 55)  # your thumb bends 55° at most: that is its 86°
+```
+
+The 3D view of `metaquest-teleop` uses the same ranges.
+
+The ADAPT thumb's CMC joints are a gimbal: CMC2 swings its first bone from sideways towards the
+fingers, then CMC1 turns it about the hand's long axis towards the palm's front. Your thumb's
+first bone is read the same way, so its CMC1 and CMC2 follow yours.
 
 ## A pose the ADAPT hand can take
 
@@ -70,7 +92,7 @@ The ADAPT hand's joints are coupled, as in VirtualModelControl and HumanManipula
 
 So `adapt.joint_angles(hand)` is always a pose the robot can take: the dashboard, `--print_joints`
 and `/metaquest/adapt/joint_states` show what the robot does. `joint_angles(hand, coupled=False)`
-gives your angles one by one instead, PIP and DIP apart.
+gives the angles before that, joint by joint, PIP and DIP apart.
 
 ## Limits
 
@@ -98,13 +120,6 @@ come closest to the joints:
 
 Each motor then stays where all its joints are within their limits. `adapt.COUPLING @ motors`
 gives the joint angles the robot will reach: exactly `adapt.joint_angles(hand)`.
-
-## The thumb
-
-At zero, the ADAPT thumb sticks straight out sideways, about 65° further from the index than a
-relaxed thumb, beyond its CMC2 range of ±29°. So CMC2 is measured from a relaxed thumb: yours
-relaxed puts the robot's in the middle of its range, and moving yours moves it as much.
-`adapt.THUMB_REST` is that 65°; `joint_angles(hand, thumb_rest=0)` gives the exact angle.
 
 ## The wrist
 

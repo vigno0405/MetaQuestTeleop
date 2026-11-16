@@ -53,8 +53,6 @@ Below, *method* is something you call with `()`, like `quest.wait()`; *property*
 
 .. autofunction:: metaquest_teleop.adapt.wrist_pose
 
-.. autofunction:: metaquest_teleop.adapt.thumb_cmc
-
 .. autofunction:: metaquest_teleop.adapt.positions
 
 .. autodata:: metaquest_teleop.adapt.JOINTS
@@ -69,7 +67,7 @@ Below, *method* is something you call with `()`, like `quest.wait()`; *property*
 .. autodata:: metaquest_teleop.adapt.COUPLING
    :no-value:
 
-.. autodata:: metaquest_teleop.adapt.THUMB_REST
+.. autodata:: metaquest_teleop.adapt.HUMAN_RANGES
    :no-value:
 ```
 
