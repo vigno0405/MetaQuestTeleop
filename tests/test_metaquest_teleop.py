@@ -285,7 +285,8 @@ def test_the_3d_view_knows_whether_the_adapt_hand_is_on():
     assert seen == {True: True, False: False}
     # and your ranges as they are now, for the view to map your hand as the library does
     assert status["human_ranges"] == [list(map(float, adapt.HUMAN_RANGES.get(j, (0, 0)))) for j in adapt.JOINTS]
-    assert np.allclose(status["cmc2_plane"], adapt.cmc2_plane())  # and the thumb's CMC2 from your thumb
+    # and the poses that give the thumb's CMC2 from yours
+    assert status["cmc2_poses"] == [[float(b), float(s), float(v)] for (b, s), v in adapt.CMC2_POSES.items()]
     assert status["adapt_fit"] is True  # and whether it fits the ADAPT hand to yours
 
 
@@ -460,20 +461,21 @@ def test_joint_for_joint_the_adapt_hand_does_what_yours_does():
 def test_the_thumbs_cmc2_follows_your_base_and_spread_through_your_poses():
     from metaquest_teleop import adapt
 
-    # The plane through your three poses: (base, spread) -> CMC2, degrees.
-    a, b, c = adapt.cmc2_plane()
+    # Through every pose of yours exactly: (base, spread) -> CMC2, degrees.
     for (base, spread), cmc2 in adapt.CMC2_POSES.items():
-        assert a + b * base + c * spread == pytest.approx(cmc2, abs=1e-9)
-    assert (a, b, c) == pytest.approx((100 / 11, -12 / 11, 4 / 11))
-    # Both ways, the ADAPT's CMC2 is that plane at your thumb's base and spread, within its range.
+        assert adapt.cmc2(base, spread) == pytest.approx(cmc2, abs=1e-9)
+    # Both ways, the ADAPT's CMC2 is that surface at your thumb's base and spread, within its range.
     low, high = adapt.JOINT_LIMITS["thumb_CMC2"]
     rng = np.random.default_rng(50)
     for _ in range(20):
         hand = synthetic_hand("right", _angles(rng), _pose(rng))
         base, spread = np.degrees(hand.angles[0, :2])
-        want = np.clip(np.radians(a + b * base + c * spread), low, high)
+        want = np.clip(np.radians(adapt.cmc2(base, spread)), low, high)
         for fit in (True, False):
             assert adapt.joint_angles(hand, fit=fit)[1] == pytest.approx(want, abs=1e-9)
+    # Smooth between the poses: no jump anywhere on a fine grid.
+    grid = np.array([[adapt.cmc2(b, s) for s in np.arange(-10, 61, 0.5)] for b in np.arange(-10, 91, 0.5)])
+    assert np.abs(np.diff(grid, axis=0)).max() < 2 and np.abs(np.diff(grid, axis=1)).max() < 2
     # -60° is within reach: CMC2 goes from -70° to 30°, as in virtualmodelcontrol.
     assert np.degrees([low, high]) == pytest.approx([-70, 30])
     # And you can change the poses at any time.
@@ -483,6 +485,10 @@ def test_the_thumbs_cmc2_follows_your_base_and_spread_through_your_poses():
         adapt.CMC2_POSES.update({(0, 0): 10, (90, 0): 10, (0, 90): 10})  # always 10°
         hand = synthetic_hand("right", _angles(rng), _pose(rng))
         assert np.degrees(adapt.joint_angles(hand)[1]) == pytest.approx(10)
+        adapt.CMC2_POSES.clear()  # three poses: the plane through them
+        adapt.CMC2_POSES.update({(20, 35): 0, (70, 20): -60, (0, 30): 20})
+        for base, spread in ((10, 10), (50, 40), (80, 0)):
+            assert adapt.cmc2(base, spread) == pytest.approx((100 - 12 * base + 4 * spread) / 11, abs=1e-9)
     finally:
         adapt.CMC2_POSES.clear()
         adapt.CMC2_POSES.update(saved)
@@ -521,35 +527,40 @@ def test_the_fit_puts_the_adapt_hand_where_yours_is():
 
     from metaquest_teleop import adapt
 
-    # A hand shaped as an ADAPT pose gets that pose back (a hair off: the pull towards the
-    # joint-for-joint pose, which picks one pose when several fit as well).
+    # A hand shaped as an ADAPT pose gets its fingers back (a hair off: the pull towards the
+    # joint-for-joint pose, which picks one pose when several fit as well). The thumb follows
+    # yours joint for joint, in the fit too.
     rng = np.random.default_rng(40)
     low, high = adapt._MOTOR_LOW, adapt._MOTOR_HIGH
-    saved = dict(adapt.CMC2_POSES)
-    try:
-        for _ in range(10):
-            motors = rng.uniform(low, high)
-            motors[4] = 0.0  # no spread: your knuckles are then the ADAPT's own
-            joints = adapt.COUPLING @ motors
-            hand = _adapt_shaped_hand(joints)
-            cmc2 = np.degrees(joints[1])  # CMC2 comes from CMC2_POSES: there, the pose's own
-            adapt.CMC2_POSES.clear()
-            adapt.CMC2_POSES.update({(0, 0): cmc2, (90, 0): cmc2, (0, 90): cmc2})
-            assert np.degrees(np.abs(adapt.joint_angles(hand) - joints)).max() < 1.0
-            fingers, thumb = _distance_to(hand, adapt.joint_angles(hand))
-            assert fingers < 0.5 and thumb < 0.5
-    finally:
-        adapt.CMC2_POSES.clear()
-        adapt.CMC2_POSES.update(saved)
+    for _ in range(10):
+        motors = rng.uniform(low, high)
+        motors[4] = 0.0  # no spread: your knuckles are then the ADAPT's own
+        joints = adapt.COUPLING @ motors
+        hand = _adapt_shaped_hand(joints)
+        got = adapt.joint_angles(hand)
+        assert np.degrees(np.abs(got[4:] - joints[4:])).max() < 1.0
+        assert np.allclose(got[:4], adapt.joint_angles(hand, fit=False)[:4], atol=1e-12)
+        fingers, _ = _distance_to(hand, got)
+        assert fingers < 0.5
 
-    # Your hand: the fit is nearer to it than joint for joint is, within the same limits.
+    # Your hand: the fit is nearer to it than joint for joint is, within the same limits, as
+    # the fit measures it (it starts there, and each step it takes brings the hand nearer).
+    def cost(hand, joints):
+        goal, gaps, pinch = adapt._targets(hand)
+        motors = adapt.motor_angles(joints)
+        r, _ = adapt._residuals(motors, goal, gaps, pinch, motors)  # no pull: from itself
+        return r @ r
+
     rng = np.random.default_rng(41)
+    nearer = 0
     for _ in range(20):
         hand = synthetic_hand("right", _angles(rng), _pose(rng))
-        fitted, direct = _distance_to(hand, adapt.joint_angles(hand)), _distance_to(hand, adapt.joint_angles(hand, fit=False))
-        assert sum(fitted) < sum(direct)
+        fitted, direct = cost(hand, adapt.joint_angles(hand)), cost(hand, adapt.joint_angles(hand, fit=False))
+        assert fitted <= direct + 1e-12
+        nearer += fitted < 0.9 * direct
+    assert nearer >= 15
 
-    # A pinch: your thumb tip on your index tip brings the ADAPT's together.
+    # A pinch: your thumb tip on your index tip brings the ADAPT's fingertip towards its thumb tip.
     wrist = Pose(np.zeros(3), np.array([0.0, 0.0, 0.0, 1.0]))
     for target in (9, 14):
         h = synthetic_hand("right", np.array([[0.9, 0.2, 0.44, 0.52], [0.6, 0, 0.7, 0.3], [0.6, 0, 0.7, 0.3]]
@@ -561,7 +572,7 @@ def test_the_fit_puts_the_adapt_hand_where_yours_is():
         direct = {d: points[-1] for d, points in adapt.positions(adapt.joint_angles(h, fit=False)).items()}
         finger = adapt.DIGITS[target // 5]
         gap, before = (np.linalg.norm(t["thumb"] - t[finger]) * 1000 for t in (tips, direct))
-        assert gap < 30 and gap < before / 2, (gap, before)  # CMC2 held by CMC2_POSES; the rest closes in
+        assert gap < 0.75 * before, (gap, before)  # the thumb held as yours: the fingers close in on it
 
     # More of yours, more of the ADAPT's.
     def follows(index, joint, values):
@@ -619,9 +630,7 @@ def test_adapt_joints_take_your_angles_and_the_motors_reduce_them():
         yours += [a[f, 1], a[f, 0], a[f, 2], a[f, 3]]
     for i, name in enumerate(adapt.JOINTS):
         if name == "thumb_CMC2":  # from your thumb's base and spread, through CMC2_POSES
-            a0, per_base, per_spread = adapt.cmc2_plane()
-            base, spread = np.degrees(a[0, :2])
-            assert joints[i] == pytest.approx(np.radians(a0 + per_base * base + per_spread * spread), abs=1e-12)
+            assert joints[i] == pytest.approx(np.radians(adapt.cmc2(*np.degrees(a[0, :2]))), abs=1e-12)
             continue
         (h_low, h_high), (low, high) = np.radians(adapt.HUMAN_RANGES[name]), adapt.JOINT_LIMITS[name]
         share = 0.0 if h_high == h_low else (yours[i] - h_low) / (h_high - h_low)

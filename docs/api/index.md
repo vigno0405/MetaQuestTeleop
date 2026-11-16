@@ -74,7 +74,7 @@ Below, *method* is something you call with `()`, like `quest.wait()`; *property*
 
 .. autodata:: metaquest_teleop.adapt.CMC2_POSES
 
-.. autofunction:: metaquest_teleop.adapt.cmc2_plane
+.. autofunction:: metaquest_teleop.adapt.cmc2
 ```
 
 ## Names

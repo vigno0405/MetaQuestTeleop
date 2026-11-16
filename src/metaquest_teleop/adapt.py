@@ -78,16 +78,36 @@ HUMAN_RANGES = {
 
 #: The ADAPT thumb's CMC2, in degrees, for poses of your thumb: (base, spread) -> CMC2, your
 #: thumb's base and spread in degrees as the dashboard shows them (the thumb's row of
-#: :attr:`Hand.angles <metaquest_teleop.Hand.angles>`). CMC2 follows the plane through them,
-#: ``CMC2 = a + b * base + c * spread`` (the least-squares plane, with more than three), in the
-#: fit too. Change, add or remove poses at any time.
+#: :attr:`Hand.angles <metaquest_teleop.Hand.angles>`). CMC2 follows the smoothest surface through
+#: them (:func:`cmc2`): exactly each pose's, and with three poses the plane through them. At least
+#: three, not on one line. Change, add or remove poses at any time.
 CMC2_POSES = {(20, 35): 0, (70, 20): -60, (0, 30): 20}
 
 
-def cmc2_plane() -> np.ndarray:
-    """(a, b, c), degrees: the plane through :data:`CMC2_POSES`, ``CMC2 = a + b * base + c * spread``."""
-    poses = np.array([(base, spread, cmc2) for (base, spread), cmc2 in CMC2_POSES.items()], dtype=float)
-    return np.linalg.lstsq(np.c_[np.ones(len(poses)), poses[:, :2]], poses[:, 2], rcond=None)[0]
+def _spline(r: np.ndarray) -> np.ndarray:
+    """The thin-plate spline's kernel, r^2 log r (0 at r = 0)."""
+    return np.where(r > 0.0, r * r * np.log(np.where(r > 0.0, r, 1.0)), 0.0)
+
+
+def _cmc2_surface() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The thin-plate spline through CMC2_POSES: the poses (n, 2), their weights (n,) and the
+    plane's (a, b, c)."""
+    poses = np.array(list(CMC2_POSES), dtype=float).reshape(-1, 2)
+    values = np.array(list(CMC2_POSES.values()), dtype=float)
+    n = len(poses)
+    plane = np.c_[np.ones(n), poses]
+    system = np.block([[_spline(np.linalg.norm(poses[:, None] - poses[None], axis=-1)), plane],
+                       [plane.T, np.zeros((3, 3))]])
+    solved = np.linalg.solve(system, np.r_[values, np.zeros(3)])
+    return poses, solved[:n], solved[n:]
+
+
+def cmc2(base: float, spread: float) -> float:
+    """The ADAPT thumb's CMC2, degrees, for your thumb's base and spread, degrees: the smoothest
+    surface through :data:`CMC2_POSES` (a thin-plate spline: a plane, bent just enough to pass
+    through every pose), before the joint's limits."""
+    poses, weights, (a, b, c) = _cmc2_surface()
+    return float(a + b * base + c * spread + weights @ _spline(np.hypot(base - poses[:, 0], spread - poses[:, 1])))
 
 
 DIGITS = ("thumb", "index", "middle", "ring", "pinky")
@@ -228,8 +248,7 @@ def _wanted(hand: Hand) -> np.ndarray:
     share = np.divide(yours - low, span, out=np.zeros(20), where=span != 0.0)
     wanted = _LOW + share * (_HIGH - _LOW)
     base, spread = np.degrees(hand.angles[0, :2])
-    a, b, c = cmc2_plane()
-    wanted[1] = np.radians(a + b * base + c * spread)
+    wanted[1] = np.radians(cmc2(base, spread))
     return wanted
 
 
@@ -243,10 +262,11 @@ def _fit(joints: np.ndarray, clip: bool) -> np.ndarray:
 #: at any time: ``metaquest-teleop --no-adapt-fit`` sets it to False.
 FIT = True
 
-# The fit: how much each matched point counts, per digit (thumb: its MCP, IP and tip from its
-# base; a finger: its PIP, DIP and tip); a pinch (your thumb tip near a fingertip); and the pull
-# towards the joint-for-joint pose, which picks one among poses that fit equally well [m/rad].
-_POINT_WEIGHTS = np.array([[0.7, 0.7, 1.0]] + [[0.5, 0.7, 1.0]] * 4)
+# The fit: how much each matched point counts, per digit (a finger: its PIP, DIP and tip; the
+# thumb's shape does not count: the thumb is held as yours); a pinch (your thumb tip near a
+# fingertip); and the pull towards the joint-for-joint pose, which picks one among poses that fit
+# equally well [m/rad].
+_POINT_WEIGHTS = np.array([[0.0, 0.0, 0.0]] + [[0.5, 0.7, 1.0]] * 4)
 _PINCH_REACH, _PINCH_WEIGHT = 0.03, 3.0  # m: a gap this small counts, up to 3x a fingertip
 _PULL = 0.0005
 _ITERATIONS = 24
@@ -328,7 +348,7 @@ def _solve(hand: Hand, clip: bool) -> np.ndarray:
     low, high = (_MOTOR_LOW.copy(), _MOTOR_HIGH.copy()) if clip else (np.full(13, -np.inf), np.full(13, np.inf))
     goal, gaps, pinch = _targets(hand)
     m = start = _fit(_wanted(hand), clip)
-    low[1] = high[1] = start[1]  # the thumb's CMC2 stays as CMC2_POSES has it; the rest fits around it
+    low[:4] = high[:4] = start[:4]  # the thumb stays as yours, joint for joint; the fingers fit around it
     r, jac = _residuals(m, goal, gaps, pinch, start)
     cost, damping, grow = r @ r, 1e-3, 2.0
     for _ in range(_ITERATIONS):
@@ -370,13 +390,13 @@ def _fitted(hand: Hand, clip: bool) -> np.ndarray:
 def joint_angles(hand: Hand, clip: bool = True, coupled: bool = True, fit: bool | None = None) -> np.ndarray:
     """(20,) the ADAPT joint angles for your hand, radians, in :data:`JOINTS` order: a pose it can take.
 
-    The thumb's CMC2 always follows your thumb's base and spread, through :data:`CMC2_POSES`.
+    The thumb always follows yours joint for joint (below): its CMC1, MCP and IP through
+    :data:`HUMAN_RANGES`, its CMC2 from your thumb's base and spread through :data:`CMC2_POSES`.
 
-    The fit (``fit=True``, the default: :data:`FIT`): the pose that puts the ADAPT hand closest
-    to yours, through its forward kinematics, its CMC2 held as above. Your knuckles on its
-    knuckles (a scale and a shift), its fingers' PIP, DIP and tips on yours; its thumb shaped as
-    yours from the thumb's base (MCP, IP and tip, at the ADAPT thumb's length); and a thumb tip as
-    near each fingertip as yours is, when you pinch. Only poses the hand can take: its motors
+    The fit (``fit=True``, the default: :data:`FIT`): the fingers' pose that puts the ADAPT hand
+    closest to yours, through its forward kinematics, around that thumb. Your knuckles on its
+    knuckles (a scale and a shift), its fingers' PIP, DIP and tips on yours, and a fingertip as
+    near the thumb tip as yours is, when you pinch. Only poses the hand can take: its motors
     (:data:`COUPLING`), within :data:`JOINT_LIMITS` (``clip=False``: without them).
 
     Joint for joint (``fit=False``): each ADAPT joint follows the same joint of yours, your range

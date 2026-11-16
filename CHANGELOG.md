@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0 (2026-11-16)
+
+- The ADAPT thumb follows yours joint for joint, in the fit too: its CMC1, MCP and IP through
+  `adapt.HUMAN_RANGES`, its CMC2 through `adapt.CMC2_POSES`. The fit places the fingers around it.
+  Fitting the thumb's shape bent its MCP to its 86° limit in most grasps, whatever yours did;
+  now its MCP and IP follow yours.
+- The thumb's CMC2 follows the smoothest surface through your poses (a thin-plate spline):
+  exactly each pose's CMC2, and with three poses the plane through them, as before.
+  `adapt.cmc2(base, spread)` gives it; it replaces `adapt.cmc2_plane()`.
+- A pinch brings the ADAPT's fingertip towards its thumb tip; the thumb stays as yours.
+
 ## 0.9.0 (2026-11-16)
 
 - The ADAPT thumb's CMC2 follows your thumb's base and spread, as the dashboard shows them,

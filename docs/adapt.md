@@ -51,28 +51,30 @@ or while a hand is not seen ([teleoperation](teleop.md)). `--no-adapt` leaves th
 ## Joints: the pose closest to yours
 
 The ADAPT hand is not your hand: its bones have other lengths, its thumb sits elsewhere on the
-palm, and its joints turn about other axes. So its joints do not copy your angles: they take the
-pose that puts its hand where yours is, through its forward kinematics:
+palm, and its joints turn about other axes. Its **thumb** follows yours joint for joint: its CMC1,
+MCP and IP through your ranges ([below](#joints-joint-for-joint)), its CMC2 through your poses
+([below](#the-thumbs-cmc2)). Its **fingers** take the pose that puts them where yours are, around
+that thumb, through its forward kinematics:
 
 - **your knuckles on its knuckles**: your hand, scaled and shifted so that your four knuckles
   (index to pinky) fall on the ADAPT's;
 - **each finger's PIP, DIP and tip on yours**, the tip counting most;
-- **its thumb shaped as yours**: its MCP, IP and tip from the thumb's own base, as yours are from
-  yours, at the ADAPT thumb's length. The thumbs' bases sit apart on the palm, so the thumb
-  matches by its shape, not by where it is;
-- **a pinch closes**: when your thumb tip comes near a fingertip, the ADAPT's thumb tip goes as
-  near that fingertip, which then counts the most.
+- **a pinch closes in**: when your thumb tip comes near a fingertip, the ADAPT's fingertip goes
+  towards its thumb tip, which then counts the most.
 
 Only poses the ADAPT hand can take count: those of its 13 motors (each DIP mimics its PIP, one
 motor spreads the fingers: [below](#a-pose-the-adapt-hand-can-take)), within its limits. Where a
-limit stops a joint, the others make up for it as best they can. The thumb's CMC2 is not fitted:
-it follows your thumb's base and spread ([below](#the-thumbs-cmc2)), and the rest of the hand fits
-around it.
+limit stops a joint, the others make up for it as best they can.
 
-The fit is a least-squares fit (Levenberg-Marquardt) over the 13 motors. It starts from the
+The fit is a least-squares fit (Levenberg-Marquardt) over the finger motors. It starts from the
 joint-for-joint pose (below), takes a few milliseconds, and pulls very slightly towards that
-pose, which picks one pose when several fit as well. A hand shaped exactly as an ADAPT pose
-gets that pose back.
+pose, which picks one pose when several fit as well. Fingers shaped exactly as an ADAPT pose get
+that pose back.
+
+The thumb is not fitted because the two thumbs differ too much to match their shapes: fitting
+it bent the ADAPT's MCP to its limit in most grasps, whatever yours did. Joint for joint, its MCP
+and IP follow yours. The catch is pinches: unless your poses turn CMC2 towards the fingers when
+you pinch, the ADAPT's thumb tip stays short of the fingertip.
 
 ## Joints: joint for joint
 
@@ -120,16 +122,18 @@ dashboard shows (the thumb's row of `Hand.angles`), through poses of yours that 
 | 70° | 20° | −60° |
 | 0° | 30° | 20° |
 
-CMC2 follows the plane through them: CMC2 = a + b · base + c · spread, here
-(100 − 12 · base + 4 · spread) / 11 degrees, within its range of −70° to 30°. It does so in the
-fit as well as joint for joint. To fit your hand, change, add or remove poses, at any time; with
-more than three, CMC2 follows the least-squares plane:
+CMC2 follows the smoothest surface through them (a thin-plate spline): a plane, bent just enough
+to pass through every pose exactly, within its range of −70° to 30°. With these three poses it is
+the plane through them, (100 − 12 · base + 4 · spread) / 11 degrees. It does so in the fit as well
+as joint for joint. To fit your hand, change, add or remove poses, at any time (at least three,
+not on one line). A pose bends the surface around it, and further away too, the more it
+disagrees with the others: check your other poses after adding one.
 
 ```python
 from metaquest_teleop import adapt
 
 adapt.CMC2_POSES[(45, 25)] = -20  # base 45°, spread 25°: CMC2 -20°
-print(adapt.cmc2_plane())          # (a, b, c) of the plane, degrees
+print(adapt.cmc2(10, 40))          # the CMC2 you get at base 10°, spread 40°, degrees
 ```
 
 The 3D view of `metaquest-teleop` follows the same poses.
