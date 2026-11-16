@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.9.0 (2026-11-16)
+
+- The ADAPT thumb's CMC2 follows your thumb's base and spread, as the dashboard shows them,
+  through poses of yours that give a CMC2 (`adapt.CMC2_POSES`): base 20°, spread 35° gives 0°;
+  70°, 20° gives -60°; 0°, 30° gives 20°. It follows the plane through them (least squares with
+  more than three; `adapt.cmc2_plane()`), in the fit as well as joint for joint: the fit holds
+  CMC2 there and places the rest of the hand around it. Change the poses at any time; the 3D view
+  follows them.
+- The thumb's CMC2 goes from -70° to 30°, as in VirtualModelControl (the real hand turned it to
+  -73° in HumanManipulationVMC's experiments); it was -29° to 29°.
+- `adapt.HUMAN_RANGES` no longer has the thumb's CMC2.
+
 ## 0.8.0 (2026-11-16)
 
 - The ADAPT hand takes the pose closest to yours, through its forward kinematics, instead of

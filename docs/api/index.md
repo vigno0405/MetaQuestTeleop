@@ -71,6 +71,10 @@ Below, *method* is something you call with `()`, like `quest.wait()`; *property*
    :no-value:
 
 .. autodata:: metaquest_teleop.adapt.FIT
+
+.. autodata:: metaquest_teleop.adapt.CMC2_POSES
+
+.. autofunction:: metaquest_teleop.adapt.cmc2_plane
 ```
 
 ## Names

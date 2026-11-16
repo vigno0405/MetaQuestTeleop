@@ -333,7 +333,7 @@ const ADAPT_JOINTS = {
 };
 const ADAPT_TIP = [0.0, 0.0, 0.0175];        // a fingertip, along its last bone (+z), as adapt.TIP_OFFSETS
 const ADAPT_THUMB_TIP = [-0.025, 0.0, 0.0];   // the thumb's: its last bone runs along -x
-const ADAPT_LIMITS = [[0, 1.5], [-0.5, 0.5], [0, 1.5], [0, 1.2],
+const ADAPT_LIMITS = [[0, 1.5], [-70 * Math.PI / 180, 30 * Math.PI / 180], [0, 1.5], [0, 1.2],
                       [-0.3, 0], [0, 1.5], [0, 1.2], [0, 1.2], [0, 0], [0, 1.5], [0, 1.2], [0, 1.2],
                       [0, 0.3], [0, 1.5], [0, 1.2], [0, 1.2], [0, 0.3], [0, 1.5], [0, 1.2], [0, 1.2]];
 const ADAPT_FINGER_TRANSMISSIONS = {  // motor pulley, finger pulley, PIP cable constant [m]
@@ -346,11 +346,14 @@ const ADAPT_SPREAD = { index: 1.0, middle: 0.0, ring: -1.0, pinky: -1.5 };
 // Your range for each ADAPT joint, as adapt.HUMAN_RANGES: the angles of yours (degrees) that give
 // the low and the high end of its range, in the ADAPT joints' order.
 const ADAPT_HUMAN = [
-  [5, 95], [16, 74], [0, 65], [0, 80],
+  [5, 95], [0, 0], [0, 65], [0, 80],  // the thumb's CMC2: from ADAPT_CMC2_PLANE
   [20, 0], [0, 90], [0, 90], [0, 60], [0, 0], [0, 90], [0, 90], [0, 60],
   [0, -15], [0, 90], [0, 90], [0, 60], [0, -25], [0, 90], [0, 90], [0, 60],
 ];
 let adaptRanges = ADAPT_HUMAN;  // metaquest-teleop sends its own, which you may have changed
+// The ADAPT thumb's CMC2 (degrees) from your thumb's base and spread (degrees), as adapt.cmc2_plane():
+// a + b * base + c * spread, through adapt.CMC2_POSES (base 20, spread 35: 0; 70, 20: -60; 0, 30: 20).
+let adaptCmc2Plane = [100 / 11, -12 / 11, 4 / 11];  // metaquest-teleop sends its own
 const adaptClip = (joints) => joints.map((v, i) => Math.min(Math.max(v, ADAPT_LIMITS[i][0]), ADAPT_LIMITS[i][1]));
 
 // Joint angles = ADAPT_COUPLING (20 x 13) · motor angles.
@@ -410,10 +413,13 @@ function adaptWanted(angles, joints) {
   const d = norm([dot(column(rw, 0), b), -dot(column(rw, 1), b), -dot(column(rw, 2), b)]);
   const yours = [Math.atan2(d[1], -d[0]), Math.asin(Math.min(Math.max(d[2], -1), 1)), angles[0][2], angles[0][3]];
   for (let f = 1; f < 5; f++) yours.push(angles[f][1], angles[f][0], angles[f][2], angles[f][3]);
-  return yours.map((v, i) => {
+  const wanted = yours.map((v, i) => {
     const [lo, hi] = adaptRanges[i].map((x) => x * Math.PI / 180), [low, high] = ADAPT_LIMITS[i];
     return hi === lo ? low : low + (v - lo) / (hi - lo) * (high - low);
   });
+  const [at0, perBase, perSpread] = adaptCmc2Plane, base = angles[0][0] * 180 / Math.PI, spread = angles[0][1] * 180 / Math.PI;
+  wanted[1] = (at0 + perBase * base + perSpread * spread) * Math.PI / 180;  // the thumb's CMC2, from your base and spread
+  return wanted;
 }
 
 // The fit, as adapt's: how much each matched point counts per digit (the thumb's MCP, IP and tip
@@ -537,10 +543,11 @@ function solveLinear(A, b) {
 const adaptLast = {};  // clip -> [joints, ranges, motors]: the last fit, for the next caller of that frame
 function adaptFitMotors(wanted, joints, clip = true) {
   const last = adaptLast[clip];
-  if (last && last[0] === joints && last[1] === adaptRanges) return last[2].slice();
-  const [low, high] = clip ? ADAPT_MOTOR_RANGES : [new Array(13).fill(-Infinity), new Array(13).fill(Infinity)];
+  if (last && last[0] === joints && last[1] === adaptRanges && last[3] === adaptCmc2Plane) return last[2].slice();
+  const [low, high] = (clip ? ADAPT_MOTOR_RANGES : [new Array(13).fill(-Infinity), new Array(13).fill(Infinity)]).map((v) => v.slice());
   const [goal, gaps, pinch] = adaptTargets(joints);
   const start = adaptMotors(wanted, clip);
+  low[1] = high[1] = start[1];  // the thumb's CMC2 stays as the plane has it; the rest fits around it
   let m = start, [r, J] = adaptResiduals(m, goal, gaps, pinch, start);
   let cost = r.reduce((s, v) => s + v * v, 0), damping = 1e-3, grow = 2;
   for (let it = 0; it < ADAPT_ITERATIONS; it++) {
@@ -569,7 +576,7 @@ function adaptFitMotors(wanted, joints, clip = true) {
       if (damping > 1e10) break;
     }
   }
-  adaptLast[clip] = [joints, adaptRanges, m];
+  adaptLast[clip] = [joints, adaptRanges, m, adaptCmc2Plane];
   return m.slice();
 }
 
@@ -675,6 +682,7 @@ function connect() {
     if (msg.status) status = msg.status;
     if (msg.status && msg.status.human_ranges) adaptRanges = msg.status.human_ranges;
     if (msg.status && typeof msg.status.adapt_fit === "boolean") adaptFit = msg.status.adapt_fit;
+    if (msg.status && msg.status.cmc2_plane) adaptCmc2Plane = msg.status.cmc2_plane;
     if (msg.frame) {
       frame = msg.frame;
       lastFrameAt = performance.now();

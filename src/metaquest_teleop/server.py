@@ -316,7 +316,14 @@ class QuestHands:
         """adapt.HUMAN_RANGES as they are now, in the ADAPT joints' order, for the 3D view."""
         from . import adapt  # noqa: PLC0415 -- adapt imports this module, through fake
 
-        return [[float(v) for v in adapt.HUMAN_RANGES[j]] for j in adapt.JOINTS]
+        return [[float(v) for v in adapt.HUMAN_RANGES.get(j, (0, 0))] for j in adapt.JOINTS]
+
+    @staticmethod
+    def _cmc2_plane() -> list:
+        """adapt.cmc2_plane() as it is now: the ADAPT thumb's CMC2 from your thumb's base and spread."""
+        from . import adapt  # noqa: PLC0415 -- adapt imports this module, through fake
+
+        return [float(v) for v in adapt.cmc2_plane()]
 
     @staticmethod
     def _adapt_fit() -> bool:
@@ -334,6 +341,7 @@ class QuestHands:
                 "teleop": None if self.teleop is None else self.teleop.command().reason or "moving",
                 "adapt": None if self.teleop is None else self.teleop.adapt,
                 "human_ranges": self._human_ranges(), "adapt_fit": self._adapt_fit(),
+                "cmc2_plane": self._cmc2_plane(),
                 **{key: self.headset.get(key) for key in ("session", "mode", "fps", "space")}}
 
     # -- frames from the headset ------------------------------------------------------------- #

@@ -50,9 +50,10 @@ MOTORS = (
 WRIST_MOTORS = ("wrist_yaw", "wrist_pitch")
 WRIST_ANGLES = (0.0, 0.0)
 
-#: The range of each joint, (low, high) in radians.
+#: The range of each joint, (low, high) in radians, as in ``virtualmodelcontrol``. The thumb's CMC2
+#: goes from -70° to 30°: the real hand turned it to -73° in the experiments of HumanManipulationVMC.
 JOINT_LIMITS = {
-    "thumb_CMC1": (0.0, 1.5), "thumb_CMC2": (-0.5, 0.5), "thumb_MCP": (0.0, 1.5), "thumb_IP": (0.0, 1.2),
+    "thumb_CMC1": (0.0, 1.5), "thumb_CMC2": (float(np.radians(-70.0)), float(np.radians(30.0))), "thumb_MCP": (0.0, 1.5), "thumb_IP": (0.0, 1.2),
     "index_spread": (-0.3, 0.0), "index_MCP": (0.0, 1.5), "index_PIP": (0.0, 1.2), "index_DIP": (0.0, 1.2),
     "middle_spread": (0.0, 0.0), "middle_MCP": (0.0, 1.5), "middle_PIP": (0.0, 1.2), "middle_DIP": (0.0, 1.2),
     "ring_spread": (0.0, 0.3), "ring_MCP": (0.0, 1.5), "ring_PIP": (0.0, 1.2), "ring_DIP": (0.0, 1.2),
@@ -65,15 +66,29 @@ JOINT_LIMITS = {
 #: the robot's. Typical ranges, set so that an open hand gives all zeros (the hand's home), a
 #: power grasp about PC1 and a pinch about PC2 of HumanManipulationVMC's PoseControl (Santello
 #: et al., 1998): change them to fit your hand, at any time. A spread is yours towards the thumb (so the index
-#: goes the other way round), the thumb's CMC1 and CMC2 are read as the ADAPT's are built (see
-#: :func:`joint_angles`).
+#: goes the other way round), the thumb's CMC1 is read as the ADAPT's is built (see
+#: :func:`joint_angles`). The thumb's CMC2 is not here: :data:`CMC2_POSES`.
 HUMAN_RANGES = {
-    "thumb_CMC1": (5, 95), "thumb_CMC2": (16, 74), "thumb_MCP": (0, 65), "thumb_IP": (0, 80),
+    "thumb_CMC1": (5, 95), "thumb_MCP": (0, 65), "thumb_IP": (0, 80),
     "index_spread": (20, 0), "index_MCP": (0, 90), "index_PIP": (0, 90), "index_DIP": (0, 60),
     "middle_spread": (0, 0), "middle_MCP": (0, 90), "middle_PIP": (0, 90), "middle_DIP": (0, 60),
     "ring_spread": (0, -15), "ring_MCP": (0, 90), "ring_PIP": (0, 90), "ring_DIP": (0, 60),
     "pinky_spread": (0, -25), "pinky_MCP": (0, 90), "pinky_PIP": (0, 90), "pinky_DIP": (0, 60),
 }  # fmt: skip
+
+#: The ADAPT thumb's CMC2, in degrees, for poses of your thumb: (base, spread) -> CMC2, your
+#: thumb's base and spread in degrees as the dashboard shows them (the thumb's row of
+#: :attr:`Hand.angles <metaquest_teleop.Hand.angles>`). CMC2 follows the plane through them,
+#: ``CMC2 = a + b * base + c * spread`` (the least-squares plane, with more than three), in the
+#: fit too. Change, add or remove poses at any time.
+CMC2_POSES = {(20, 35): 0, (70, 20): -60, (0, 30): 20}
+
+
+def cmc2_plane() -> np.ndarray:
+    """(a, b, c), degrees: the plane through :data:`CMC2_POSES`, ``CMC2 = a + b * base + c * spread``."""
+    poses = np.array([(base, spread, cmc2) for (base, spread), cmc2 in CMC2_POSES.items()], dtype=float)
+    return np.linalg.lstsq(np.c_[np.ones(len(poses)), poses[:, :2]], poses[:, 2], rcond=None)[0]
+
 
 DIGITS = ("thumb", "index", "middle", "ring", "pinky")
 
@@ -205,12 +220,17 @@ def _yours(hand: Hand) -> np.ndarray:
 
 
 def _wanted(hand: Hand) -> np.ndarray:
-    """(20,) your range stretched onto the ADAPT's, joint by joint (:data:`HUMAN_RANGES`)."""
+    """(20,) your range stretched onto the ADAPT's, joint by joint (:data:`HUMAN_RANGES`); the
+    thumb's CMC2 from your thumb's base and spread (:data:`CMC2_POSES`)."""
     yours = _yours(hand)
-    low, high = np.radians(np.array([HUMAN_RANGES[j] for j in JOINTS], dtype=float)).T  # as they are now
+    low, high = np.radians(np.array([HUMAN_RANGES.get(j, (0, 0)) for j in JOINTS], dtype=float)).T  # as they are now
     span = high - low
     share = np.divide(yours - low, span, out=np.zeros(20), where=span != 0.0)
-    return _LOW + share * (_HIGH - _LOW)
+    wanted = _LOW + share * (_HIGH - _LOW)
+    base, spread = np.degrees(hand.angles[0, :2])
+    a, b, c = cmc2_plane()
+    wanted[1] = np.radians(a + b * base + c * spread)
+    return wanted
 
 
 def _fit(joints: np.ndarray, clip: bool) -> np.ndarray:
@@ -305,9 +325,10 @@ def _residuals(motors, goal, gaps, pinch, start) -> tuple[np.ndarray, np.ndarray
 def _solve(hand: Hand, clip: bool) -> np.ndarray:
     """(13,) the motor angles that put the ADAPT hand closest to yours: Levenberg-Marquardt from
     the joint-for-joint pose, within the motors' ranges if ``clip``."""
-    low, high = (_MOTOR_LOW, _MOTOR_HIGH) if clip else (np.full(13, -np.inf), np.full(13, np.inf))
+    low, high = (_MOTOR_LOW.copy(), _MOTOR_HIGH.copy()) if clip else (np.full(13, -np.inf), np.full(13, np.inf))
     goal, gaps, pinch = _targets(hand)
     m = start = _fit(_wanted(hand), clip)
+    low[1] = high[1] = start[1]  # the thumb's CMC2 stays as CMC2_POSES has it; the rest fits around it
     r, jac = _residuals(m, goal, gaps, pinch, start)
     cost, damping, grow = r @ r, 1e-3, 2.0
     for _ in range(_ITERATIONS):
@@ -333,11 +354,11 @@ def _solve(hand: Hand, clip: bool) -> np.ndarray:
     return m
 
 
-_LAST: dict = {}  # clip -> (hand, your ranges, motors): the last fit, for the next caller of that frame
+_LAST: dict = {}  # clip -> (hand, your ranges and CMC2 poses, motors): the last fit, for the next caller of that frame
 
 
 def _fitted(hand: Hand, clip: bool) -> np.ndarray:
-    ranges = tuple(tuple(HUMAN_RANGES[j]) for j in JOINTS)
+    ranges = (tuple(tuple(v) for v in HUMAN_RANGES.values()), tuple(CMC2_POSES.items()))
     last = _LAST.get(clip)
     if last is not None and last[0] is hand and last[1] == ranges:
         return last[2].copy()
@@ -349,18 +370,20 @@ def _fitted(hand: Hand, clip: bool) -> np.ndarray:
 def joint_angles(hand: Hand, clip: bool = True, coupled: bool = True, fit: bool | None = None) -> np.ndarray:
     """(20,) the ADAPT joint angles for your hand, radians, in :data:`JOINTS` order: a pose it can take.
 
+    The thumb's CMC2 always follows your thumb's base and spread, through :data:`CMC2_POSES`.
+
     The fit (``fit=True``, the default: :data:`FIT`): the pose that puts the ADAPT hand closest
-    to yours, through its forward kinematics. Your knuckles on its knuckles (a scale and a
-    shift), its fingers' PIP, DIP and tips on yours; its thumb shaped as yours from the thumb's
-    base (MCP, IP and tip, at the ADAPT thumb's length); and a thumb tip as near each fingertip as
-    yours is, when you pinch. Only poses the hand can take: its motors (:data:`COUPLING`), within
-    :data:`JOINT_LIMITS` (``clip=False``: without them).
+    to yours, through its forward kinematics, its CMC2 held as above. Your knuckles on its
+    knuckles (a scale and a shift), its fingers' PIP, DIP and tips on yours; its thumb shaped as
+    yours from the thumb's base (MCP, IP and tip, at the ADAPT thumb's length); and a thumb tip as
+    near each fingertip as yours is, when you pinch. Only poses the hand can take: its motors
+    (:data:`COUPLING`), within :data:`JOINT_LIMITS` (``clip=False``: without them).
 
     Joint for joint (``fit=False``): each ADAPT joint follows the same joint of yours, your range
     of motion stretched onto its range (:data:`HUMAN_RANGES`). A finger's spread, MCP, PIP and DIP
-    follow yours; the thumb's MCP and IP follow yours, and its CMC1 and CMC2 are read off your
-    thumb's first bone as the ADAPT's are built: CMC2 how far it points along the fingers, CMC1
-    how far it has turned about the hand's long axis, from sideways towards the palm's front.
+    follow yours; the thumb's MCP and IP follow yours, and its CMC1 is read off your thumb's first
+    bone as the ADAPT's is built: how far it has turned about the hand's long axis, from sideways
+    towards the palm's front.
     Then the pose the hand can take, as in ``virtualmodelcontrol``: a finger's DIP mimics its PIP
     (both the mean of the two), and one motor spreads the fingers (the best fit of the three). The
     fit starts from this pose.

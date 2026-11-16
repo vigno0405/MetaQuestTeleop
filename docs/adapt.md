@@ -65,8 +65,9 @@ pose that puts its hand where yours is, through its forward kinematics:
 
 Only poses the ADAPT hand can take count: those of its 13 motors (each DIP mimics its PIP, one
 motor spreads the fingers: [below](#a-pose-the-adapt-hand-can-take)), within its limits. Where a
-limit stops a joint, the others make up for it as best they can: the thumb's CMC2, for one,
-stops at 29°, and its CMC1, MCP and IP then bring the thumb tip as near yours as they can.
+limit stops a joint, the others make up for it as best they can. The thumb's CMC2 is not fitted:
+it follows your thumb's base and spread ([below](#the-thumbs-cmc2)), and the rest of the hand fits
+around it.
 
 The fit is a least-squares fit (Levenberg-Marquardt) over the 13 motors. It starts from the
 joint-for-joint pose (below), takes a few milliseconds, and pulls very slightly towards that
@@ -84,7 +85,7 @@ between. The fit starts from this pose.
 | ADAPT joint | Follows | Your range (°) | Its range (°) |
 |---|---|---|---|
 | thumb CMC1 | your thumb's first bone, turned about the hand's long axis from sideways towards the palm's front | 5 to 95 | 0 to 86 |
-| thumb CMC2 | your thumb's first bone, pointing along the fingers | 16 to 74 | −29 to 29 |
+| thumb CMC2 | your thumb's base and spread: [below](#the-thumbs-cmc2) | | −70 to 30 |
 | thumb MCP, IP | your thumb's bend at its middle and tip joints | 0 to 65, 0 to 80 | 0 to 86, 0 to 69 |
 | each finger's MCP | your bend at the base | 0 to 90 | 0 to 86 |
 | each finger's PIP, DIP | your bend at the middle and tip joints | 0 to 90, 0 to 60 | 0 to 69 |
@@ -106,7 +107,32 @@ The 3D view of `metaquest-teleop` uses the same ranges, and fits or not as the l
 
 The ADAPT thumb's CMC joints are a gimbal: CMC2 swings its first bone from sideways towards the
 fingers, then CMC1 turns it about the hand's long axis towards the palm's front. Your thumb's
-first bone is read the same way, so its CMC1 and CMC2 follow yours.
+first bone is read the same way, so its CMC1 follows yours.
+
+## The thumb's CMC2
+
+The ADAPT thumb's CMC2 follows your thumb's **base** and **spread**, the two thumb angles the
+dashboard shows (the thumb's row of `Hand.angles`), through poses of yours that give a CMC2:
+
+| Your thumb's base | Your thumb's spread | ADAPT CMC2 |
+|---|---|---|
+| 20° | 35° | 0° |
+| 70° | 20° | −60° |
+| 0° | 30° | 20° |
+
+CMC2 follows the plane through them: CMC2 = a + b · base + c · spread, here
+(100 − 12 · base + 4 · spread) / 11 degrees, within its range of −70° to 30°. It does so in the
+fit as well as joint for joint. To fit your hand, change, add or remove poses, at any time; with
+more than three, CMC2 follows the least-squares plane:
+
+```python
+from metaquest_teleop import adapt
+
+adapt.CMC2_POSES[(45, 25)] = -20  # base 45°, spread 25°: CMC2 -20°
+print(adapt.cmc2_plane())          # (a, b, c) of the plane, degrees
+```
+
+The 3D view of `metaquest-teleop` follows the same poses.
 
 ## A pose the ADAPT hand can take
 
@@ -130,7 +156,7 @@ Every joint is kept within its range, as the robot can go:
 | Joint | Range |
 |---|---|
 | thumb CMC1, MCP; each finger's MCP | 0 to 86° |
-| thumb CMC2 | −29 to 29° |
+| thumb CMC2 | −70 to 30° |
 | thumb IP; each finger's PIP and DIP | 0 to 69° |
 | spread: index / middle / ring and pinky | −17 to 0° / none / 0 to 17° |
 
