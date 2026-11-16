@@ -39,7 +39,8 @@ metaquest-teleop
 In the headset, open the **Browser**, go to **http://localhost:8012** (type the `http://`) and
 press **Start**: you see your room. Put the controllers down: the terminal shows your hands live,
 and its **robot** line whether a robot would move ([teleoperation](teleop.md)). The Meta button
-pauses, `Ctrl-C` stops.
+pauses, `Ctrl-C` stops. Run it again and the headset goes on streaming: no need to press Start
+again.
 
 When it finds ROS 2 it also publishes on [ROS 2](ros.md) topics; otherwise it says it is not
 publishing, and works the same.

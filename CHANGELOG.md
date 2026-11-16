@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Restart `metaquest-teleop` while the headset streams and it goes on without pressing Start
+  again. The dashboard and the 3D view used to say "press Start" then; now they say
+  "streaming", and the headset page tells the new one about its session again.
+- Without a ROS 2 that this Python can load, the message says why in a few words, for example
+  "ROS 2 Jazzy runs on Python 3.12, and this is Python 3.10".
+
 ## 0.5.1 (2026-11-16)
 
 - `metaquest-teleop --print_joints` prints all your joint angles and, under them, the ADAPT

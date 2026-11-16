@@ -328,6 +328,11 @@ class QuestHands:
         except ValueError as exc:
             self._event(f"bad frame: {exc}")
             return
+        if self.headset.get("session") != "started":
+            # The headset was streaming before this program started (its page reconnects by
+            # itself), from a page too old to say so: the frames say it.
+            self.headset["session"] = "started"
+            self._event("streaming: Start was already pressed in the headset")
         self._call(self._raw_callbacks, frame)  # both hands, for gestures
         sides, part = _KEPT[self.hands]
         frame = dataclasses.replace(frame, **{s: None for s in ("left", "right") if s not in sides})
@@ -368,10 +373,15 @@ class QuestHands:
                 self.headset["fps"] = msg.get("fps")
                 self._event(f"frame rate now {msg.get('fps')} Hz")
             else:
+                resumed = msg.pop("resumed", False)  # the page reconnected while streaming
                 self.headset.update(msg, session=state)
-                fps = msg.get("fps")
-                self._event(("streaming started" + (f", {fps} Hz" if fps else "")) if state == "started"
-                            else "streaming stopped")
+                rate = f", {msg['fps']} Hz" if msg.get("fps") else ""
+                if state != "started":
+                    self._event("streaming stopped")
+                elif resumed:
+                    self._event(f"streaming{rate}: Start was already pressed in the headset")
+                else:
+                    self._event(f"streaming started{rate}")
         if "stats" in msg:
             self.headset["stats"] = msg["stats"]
         if "error" in msg:

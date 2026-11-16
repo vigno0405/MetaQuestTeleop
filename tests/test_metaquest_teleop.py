@@ -428,6 +428,122 @@ def test_a_frame_rate_change_keeps_the_session_started():
     assert "streaming started" in events and "frame rate now 120 Hz" in events
 
 
+# Stand-ins for what the headset page uses: its elements, the WebSocket to the computer, timers,
+# and a WebXR session that sends no frames.
+_PAGE_STANDINS = """
+const testSent = [], testSockets = [], testTimers = [], testElements = {};
+globalThis.WebSocket = class {
+  static OPEN = 1;
+  constructor(url) { this.url = url; this.readyState = 0; testSockets.push(this); }
+  send(data) { testSent.push([testSockets.indexOf(this), JSON.parse(data)]); }
+};
+globalThis.document = {
+  getElementById: (id) => (testElements[id] = testElements[id] || { style: {}, handlers: {},
+    addEventListener(type, fn) { this.handlers[type] = fn; } }),
+  createElement: () => ({ getContext: () => ({}) }),
+};
+globalThis.location = { protocol: "http:", host: "localhost:8012", port: "8012" };
+globalThis.setTimeout = (fn) => testTimers.push(fn);
+const testSession = {
+  frameRate: 90, supportedFrameRates: [72, 90, 120],
+  updateRenderState() {}, addEventListener() {},
+  requestReferenceSpace: async () => ({}),
+  requestAnimationFrame: () => 1,
+  updateTargetFrameRate: async (rate) => { testSession.frameRate = rate; },
+};
+Object.defineProperty(globalThis, "navigator", { configurable: true, value: { userAgent: "test", xr: {
+  isSessionSupported: async (mode) => mode === "immersive-ar", requestSession: async () => testSession } } });
+globalThis.XRWebGLLayer = function () {};
+"""
+
+
+def test_the_page_tells_a_restarted_computer_it_is_still_streaming(tmp_path):
+    # metaquest-teleop restarts while the headset streams: the page reconnects by itself and says
+    # again that it is streaming, so the new one does not ask for Start.
+    html = PAGE.read_text(encoding="utf-8")
+    script = tmp_path / "reconnect.js"
+    script.write_text(_PAGE_STANDINS + html.split("<script>")[1].split("</script>")[0] + """
+(async () => {
+  const open = (socket) => { socket.readyState = 1; socket.onopen(); };
+  open(testSockets[0]);
+  await new Promise((resolve) => setImmediate(resolve));  // the headset can do immersive-ar
+  await testElements.start.handlers.click();              // Start
+  testSockets[0].readyState = 3;
+  testSockets[0].onclose();                               // metaquest-teleop stops,
+  testTimers.shift()();                                   // the page tries again,
+  open(testSockets[1]);                                   // and a new one answers
+  process.stdout.write(JSON.stringify(testSent));
+})();
+""", encoding="utf-8")
+    sent = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True, check=True).stdout)
+    started = [(socket, message) for socket, message in sent if message.get("session") == "started"]
+    assert [socket for socket, _ in started] == [0, 1]
+    first, again = started[0][1], started[1][1]
+    assert first == {"session": "started", "mode": "immersive-ar", "space": "local-floor", "fps": 90,
+                     "rates": [72, 90, 120]}
+    assert again == {**first, "fps": 120, "resumed": True}  # the same session, at its rate now
+
+
+def test_a_restarted_server_knows_the_headset_is_already_streaming():
+    # Restart metaquest-teleop while the headset streams and it goes on without Start: the page
+    # reconnects by itself. A newer page says so; an older one only sends frames. Neither should
+    # get "press Start" on the dashboard.
+    import aiohttp
+    from rich.console import Console
+
+    from metaquest_teleop.dashboard import render
+
+    port, rng = _free_port(), np.random.default_rng(3)
+    with QuestHands(port, adb=False) as quest:
+        async def page(*messages):
+            async with aiohttp.ClientSession() as session, session.ws_connect(f"ws://127.0.0.1:{port}/ws") as ws:
+                for message in messages:
+                    await (ws.send_bytes(message) if isinstance(message, bytes) else ws.send_str(json.dumps(message)))
+                for _ in range(100):
+                    if quest.headset.get("session") == "started":
+                        break
+                    await asyncio.sleep(0.02)
+                console = Console(width=120, record=True, file=io.StringIO())
+                console.print(render(quest, 120))
+                return dict(quest.headset), [text for _, text in quest.events], console.export_text()
+
+        older = asyncio.run(page({"hello": {"agent": "an older page"}}, encode(1, 0.5, _pose(rng), None, None)))
+        for _ in range(100):  # the older page has gone
+            if not quest.connected:
+                break
+            time.sleep(0.02)
+        newer = asyncio.run(page({"hello": {"agent": "a newer page"}},
+                                 {"session": "started", "mode": "immersive-ar", "space": "local-floor",
+                                  "fps": 120, "rates": [72, 90, 120], "resumed": True}))
+    info, events, dashboard = older
+    assert info["session"] == "started" and "streaming: Start was already pressed in the headset" in events
+    assert "streaming" in dashboard and "press Start in the headset" not in dashboard and "None" not in dashboard
+    info, events, dashboard = newer
+    assert info["session"] == "started" and info["fps"] == 120 and "resumed" not in info
+    assert "streaming, 120 Hz: Start was already pressed in the headset" in events
+    assert "streaming at 120 Hz" in dashboard and "press Start in the headset" not in dashboard
+
+
+def test_without_ros_it_says_why_in_a_few_words(monkeypatch):
+    import importlib.util
+    import sys
+    from types import SimpleNamespace
+
+    from metaquest_teleop.cli import ros_unavailable
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    assert ros_unavailable(ImportError("No module named 'rclpy'"))[0] == "ROS 2 not found"
+
+    # A ROS for another Python: Jazzy (3.12) from a conda environment with Python 3.10, say.
+    here, other = f"3.{sys.version_info.minor}", f"3.{sys.version_info.minor + 1}"
+    origin = f"/opt/ros/jazzy/lib/python{other}/site-packages/rclpy/__init__.py"
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: SimpleNamespace(origin=origin))
+    monkeypatch.setenv("ROS_DISTRO", "jazzy")
+    why, how = ros_unavailable(ImportError("No module named 'rclpy._rclpy_pybind11'\nThe C extension isn't present"))
+    assert why == f"ROS 2 Jazzy runs on Python {other}, and this is Python {here}"
+    assert how.startswith(f"To publish, run it with Python {other}")
+
+
 def test_print_joints_shows_the_hands_angles_and_the_adapt_ones():
     from metaquest_teleop import adapt
     from metaquest_teleop.cli import joints_header, joints_line

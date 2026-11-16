@@ -91,7 +91,12 @@ function connect() {
   ws.binaryType = "arraybuffer";
   ws.onopen = () => {
     send({ hello: { agent: navigator.userAgent, webxr: !!navigator.xr } });
-    if (session) return;
+    if (session) {
+      // Still streaming: metaquest-teleop restarted on the computer. Tell the new one about the
+      // session, so it does not ask for Start.
+      if (started) send({ ...started, fps: session.frameRate || started.fps, resumed: true });
+      return;
+    }
     if (!navigator.xr) {
       setStatus("WebXR is not available. Open this page in the Quest browser at http://localhost:"
                 + location.port + " (USB, adb reverse).", "bad");
@@ -125,6 +130,7 @@ if (navigator.xr) {
 }
 
 let session = null, refSpace = null, gl = null;
+let started = null;  // the session, as told to the computer: told again if it restarts
 let seq = 0, framesThisSecond = 0, dropped = 0, lastSecond = 0;
 const head = new Float32Array(7);
 const hands = { left: new Float32Array(HAND_FLOATS), right: new Float32Array(HAND_FLOATS) };
@@ -156,7 +162,8 @@ startBtn.addEventListener("click", async () => {
     session.addEventListener("frameratechange", () => send({ session: "framerate", fps: session.frameRate }));
     hud.style.display = "block";
     setStatus("Streaming. Press the Meta button to stop.", "ok");
-    send({ session: "started", mode, space, fps: session.frameRate || null, rates });
+    started = { session: "started", mode, space, fps: session.frameRate || null, rates };
+    send(started);
     session.requestAnimationFrame(onFrame);
     // Then ask for the highest frame rate, without waiting: the headset applies it on a later
     // frame, so waiting for it before the first frame waits forever (a black screen).
@@ -175,6 +182,7 @@ startBtn.addEventListener("click", async () => {
 
 function onEnd() {
   session = null;
+  started = null;
   hud.style.display = "none";
   send({ session: "ended" });
   setStatus("Stopped. Press Start to stream again.", "ok");

@@ -820,7 +820,7 @@ function updatePanels() {
 
     if (!status || !status.page) setLine("headset", "warn", "waiting for the page");
     else if (status.session === "started") setLine("headset", fresh() ? "ok" : "warn",
-      `streaming at ${status.fps} Hz` + (status.mode === "fake" ? " (fake headset)" : ""));
+      (status.fps ? `streaming at ${status.fps} Hz` : "streaming") + (status.mode === "fake" ? " (fake headset)" : ""));
     else setLine("headset", "warn", "page open: press Start in the headset");
 
     if (!everFrame) setLine("stream", "", "no frames yet");

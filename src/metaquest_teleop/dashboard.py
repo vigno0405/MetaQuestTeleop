@@ -55,7 +55,8 @@ def _status(quest: QuestHands) -> Panel:
     if not quest.connected:
         headset = Text.assemble(_dot(None), "waiting for the page to connect")
     elif info.get("session") == "started":
-        headset = Text.assemble(_dot(streaming), "streaming at ", (f"{info.get('fps')} Hz", "bold"),
+        fps = info.get("fps")  # unknown when an older page reconnected while streaming
+        headset = Text.assemble(_dot(streaming), "streaming", *((" at ", (f"{fps} Hz", "bold")) if fps else ()),
                                 " (fake headset)" if info.get("mode") == "fake" else "")
     else:
         headset = Text.assemble(_dot(None), "page open: press Start in the headset")
