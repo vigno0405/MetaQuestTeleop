@@ -1,0 +1,18 @@
+{% extends "!layout.html" %}
+{% block extrahead %}
+  {{ super() }}
+  <script>
+    // The GitHub badge in the header (latest release, stars, forks) is fetched once and kept for
+    // the whole life of the browser tab, so a tab opened before a release kept the old version.
+    // Forget it every 10 minutes: the theme then asks GitHub again. Runs before the theme's code.
+    (() => {
+      try {
+        const key = __md_scope.pathname + ".__source", stamp = key + ".time", now = Date.now();
+        if (now - Number(sessionStorage.getItem(stamp) || 0) > 10 * 60 * 1000) {
+          sessionStorage.removeItem(key);
+          sessionStorage.setItem(stamp, String(now));
+        }
+      } catch (e) { /* no storage: the theme fetches the badge anyway */ }
+    })();
+  </script>
+{% endblock %}

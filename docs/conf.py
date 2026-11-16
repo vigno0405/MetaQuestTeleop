@@ -23,7 +23,7 @@ napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 
 html_theme = "sphinx_immaterial"
-html_title = f"metaquest-teleop {release}"  # the version these pages are built from
+html_title = "metaquest-teleop"
 html_favicon = "_static/favicon.svg"
 # Tooltips of API objects without their synopsis, which the theme joins with an em dash.
 # The page outline lists classes, functions and attributes, not their parameters and fields.
@@ -84,5 +84,6 @@ html_show_sourcelink = False
 html_show_copyright = False
 # The 3D view comes straight from the package, so the demo in the docs is the real page.
 html_static_path = ["_static", "../src/metaquest_teleop/view.html"]
+templates_path = ["_templates"]  # layout.html: keeps the GitHub badge fresh
 html_css_files = ["custom.css"]
 add_module_names = False
