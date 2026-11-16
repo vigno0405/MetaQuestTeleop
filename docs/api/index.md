@@ -69,6 +69,8 @@ Below, *method* is something you call with `()`, like `quest.wait()`; *property*
 
 .. autodata:: metaquest_teleop.adapt.HUMAN_RANGES
    :no-value:
+
+.. autodata:: metaquest_teleop.adapt.FIT
 ```
 
 ## Names

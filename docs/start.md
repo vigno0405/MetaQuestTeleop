@@ -67,6 +67,7 @@ left hand is not seen ([teleoperation](teleop.md)).
 | `metaquest-teleop --print_joints` | print all your joint angles and the ADAPT hand's, ten times a second, instead of the dashboard |
 | `metaquest-teleop --no-ros` | do not publish on [ROS 2](ros.md) (it does whenever it finds ROS) |
 | `metaquest-teleop --no-adapt` | no [ADAPT hand](adapt.md): no ADAPT topics, and the teleoperation gives your own joint angles |
+| `metaquest-teleop --no-adapt-fit` | map the [ADAPT hand](adapt.md#joints-joint-for-joint) joint for joint instead of fitting its pose to yours |
 | `metaquest-teleop --hands both` | stream both hands; the default is the right hand only |
 | `metaquest-teleop --port 8013` | use another port |
 | `metaquest-teleop --udp 127.0.0.1:9000` | also send every frame as JSON over UDP |

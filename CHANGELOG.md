@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.0 (2026-11-16)
+
+- The ADAPT hand takes the pose closest to yours, through its forward kinematics, instead of
+  copying your angles joint for joint: your knuckles on its knuckles, its fingers' PIP, DIP and
+  tips on yours, its thumb shaped as yours from the thumb's base, and its thumb tip as near a
+  fingertip as yours when you pinch. Within its limits and its couplings (each DIP mimics its
+  PIP, one motor spreads the fingers): where a limit stops a joint, such as the thumb's CMC2 at
+  29°, the others bring the hand as close as they can. A least-squares fit over the 13 motors
+  (Levenberg-Marquardt), from the joint-for-joint pose, in a few milliseconds per frame; the
+  dashboard, `--print_joints`, ROS 2, the teleoperation and the 3D view all use it.
+- `joint_angles(hand, fit=False)`, `motor_angles(hand, fit=False)`, `adapt.FIT = False` or
+  `metaquest-teleop --no-adapt-fit`: the joint-for-joint mapping, as before (`adapt.HUMAN_RANGES`).
+  `clip=False` fits without the joint limits.
+
 ## 0.7.1 (2026-11-16)
 
 - The ADAPT thumb ends in its last bone: its tip 25 mm along it (-x), as HumanManipulationVMC

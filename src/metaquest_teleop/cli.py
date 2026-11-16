@@ -4,6 +4,7 @@
     metaquest-teleop --view                 # also open the 3D view of the hands in a browser
     metaquest-teleop --print_joints         # print your joint angles and the ADAPT hand's
     metaquest-teleop --no-adapt             # no ADAPT hand: no ADAPT topics, no ADAPT joints
+    metaquest-teleop --no-adapt-fit         # the ADAPT hand joint for joint, not fitted to yours
     metaquest-teleop --no-ros               # not on ROS 2 (the default publishes when ROS is found)
     metaquest-teleop --udp 127.0.0.1:9000   # also send every frame as JSON to a UDP port
     metaquest-teleop-fake                   # in a second terminal: a fake headset, for testing
@@ -122,10 +123,14 @@ def main() -> int:
                         help="do not publish on ROS 2")
     parser.add_argument("--no-adapt", action="store_true",
                         help="no ADAPT hand: no ADAPT topics or printed ADAPT joints; the teleoperation gives your own joint angles")
+    parser.add_argument("--no-adapt-fit", action="store_true",
+                        help="map the ADAPT hand joint for joint (your range onto its range) instead of fitting its pose to yours")
     parser.add_argument("--hands", choices=("right", "left", "both"), default="right",
                         help="the hands to stream (default right)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args()
+    if args.no_adapt_fit:
+        adapt.FIT = False
 
     try:
         quest = QuestHands(args.port, adb=not args.no_adb, udp=args.udp, hands=args.hands).start()

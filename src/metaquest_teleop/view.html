@@ -389,25 +389,188 @@ const rotAxis = (axis, angle) => {
           [z * x * t - y * s, z * y * t + x * s, c + z * z * t]];
 };
 // The 20 ADAPT joint angles for your hand: `angles` (5 rows of base, spread, middle, tip) and
-// `joints` (25 rows of x, y, z, qx, qy, qz, qw), as metaquest_teleop.adapt.joint_angles: each joint
-// follows yours, your range stretched onto its range; then the pose the ADAPT hand can take (each
-// DIP mimics its PIP, one motor spreads the fingers), unless `coupled` is false.
-function adaptJoints(angles, joints, clip = true, coupled = true) {
+// `joints` (25 rows of x, y, z, qx, qy, qz, qw), as metaquest_teleop.adapt.joint_angles. The fit
+// (`fit`, by default as metaquest-teleop's adapt.FIT): the pose that puts the ADAPT hand closest
+// to yours. Else joint for joint: each joint follows yours, your range stretched onto its range,
+// then the pose the ADAPT hand can take (each DIP mimics its PIP, one motor spreads the fingers).
+// `coupled` false: the joint-for-joint angles, before the motors.
+function adaptJoints(angles, joints, clip = true, coupled = true, fit = adaptFit) {
+  const wanted = adaptWanted(angles, joints);
+  if (!coupled) return clip ? adaptClip(wanted) : wanted;
+  const motors = fit ? adaptFitMotors(wanted, joints, clip) : adaptMotors(wanted, clip);
+  const out = ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0));
+  return clip ? adaptClip(out) : out;  // only rounding to take off
+}
+
+// Joint for joint: your range stretched onto the ADAPT's (adaptRanges), as adapt._wanted.
+function adaptWanted(angles, joints) {
   // Your thumb's first bone, in the ADAPT axes, read as the ADAPT's CMC joints turn theirs.
   const rw = quatToMat(joints[0].slice(3, 7));
   const b = sub(joints[2].slice(0, 3), joints[1].slice(0, 3));
   const d = norm([dot(column(rw, 0), b), -dot(column(rw, 1), b), -dot(column(rw, 2), b)]);
   const yours = [Math.atan2(d[1], -d[0]), Math.asin(Math.min(Math.max(d[2], -1), 1)), angles[0][2], angles[0][3]];
   for (let f = 1; f < 5; f++) yours.push(angles[f][1], angles[f][0], angles[f][2], angles[f][3]);
-  let out = yours.map((v, i) => {
+  return yours.map((v, i) => {
     const [lo, hi] = adaptRanges[i].map((x) => x * Math.PI / 180), [low, high] = ADAPT_LIMITS[i];
     return hi === lo ? low : low + (v - lo) / (hi - lo) * (high - low);
   });
-  if (coupled) {
-    const motors = adaptMotors(out, clip);
-    out = ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0));
+}
+
+// The fit, as adapt's: how much each matched point counts per digit (the thumb's MCP, IP and tip
+// from its base; a finger's PIP, DIP and tip), a pinch, and the pull towards the joint-for-joint pose.
+const ADAPT_POINT_WEIGHTS = [[0.7, 0.7, 1.0], [0.5, 0.7, 1.0], [0.5, 0.7, 1.0], [0.5, 0.7, 1.0], [0.5, 0.7, 1.0]];
+const ADAPT_PINCH_REACH = 0.03, ADAPT_PINCH_WEIGHT = 3.0, ADAPT_PULL = 0.0005, ADAPT_ITERATIONS = 24;
+let adaptFit = true;  // metaquest-teleop sends its adapt.FIT
+
+// The ADAPT hand's points (per digit its base, four joints and tip) and joint axes, in its base frame.
+function adaptChains(joints) {
+  const points = [], axes = [];
+  ADAPT_DIGITS.forEach((digit, d) => {
+    let p = add(ADAPT_PALM, ADAPT_BASES[digit]), r = IDENTITY;
+    const pts = [p], ax = [];
+    ADAPT_JOINTS[digit].forEach(([origin, axis], k) => {
+      p = add(p, matVec(r, origin));
+      ax.push(matVec(r, norm(axis)));
+      pts.push(p);
+      r = matMul(r, rotAxis(axis, joints[4 * d + k]));
+    });
+    pts.push(add(p, matVec(r, digit === "thumb" ? ADAPT_THUMB_TIP : ADAPT_TIP)));
+    points.push(pts);
+    axes.push(ax);
+  });
+  return [points, axes];
+}
+const ADAPT_HOME = adaptChains(new Array(20).fill(0))[0];
+const ADAPT_THUMB_LENGTH = [2, 3, 4].reduce((s, i) => s + Math.hypot(...sub(ADAPT_HOME[0][i + 1], ADAPT_HOME[0][i])), 0);
+
+// Where the ADAPT's points should be for your hand (the thumb's from its base, at the ADAPT
+// thumb's length), the gaps from the thumb tip to each fingertip, and how much each gap counts.
+function adaptTargets(joints) {
+  const rw = quatToMat(joints[0].slice(3, 7)), o = joints[0].slice(0, 3);
+  const yours = joints.map((j) => {
+    const v = sub(j.slice(0, 3), o);
+    return [dot(column(rw, 0), v), -dot(column(rw, 1), v), -dot(column(rw, 2), v)];
+  });
+  const knuckles = [6, 11, 16, 21].map((i) => yours[i]), theirs = [1, 2, 3, 4].map((d) => ADAPT_HOME[d][2]);
+  const mean = (ps) => ps.reduce(add).map((x) => x / ps.length);
+  const mine = mean(knuckles), home = mean(theirs);
+  let num = 0, den = 0;
+  knuckles.forEach((k, i) => { num += dot(sub(k, mine), sub(theirs[i], home)); den += dot(sub(k, mine), sub(k, mine)); });
+  const at = yours.map((y) => add(home, scale(sub(y, mine), num / den)));
+  const goal = [[2, 3, 4], [7, 8, 9], [12, 13, 14], [17, 18, 19], [22, 23, 24]].map((ids) => ids.map((i) => at[i]));
+  const length = [1, 2, 3].reduce((s, i) => s + Math.hypot(...sub(at[i + 1], at[i])), 0);
+  goal[0] = goal[0].map((p) => scale(sub(p, at[1]), ADAPT_THUMB_LENGTH / length));
+  const tips = [9, 14, 19, 24];
+  const gaps = tips.map((i) => sub(at[4], at[i]));
+  const pinch = tips.map((i) => {
+    const gap = Math.hypot(...sub(joints[i].slice(0, 3), joints[4].slice(0, 3)));
+    return ADAPT_PINCH_WEIGHT * Math.exp(-((gap / ADAPT_PINCH_REACH) ** 2));
+  });
+  return [goal, gaps, pinch];
+}
+
+// How far the ADAPT hand is from yours with these motors, and the Jacobian (rows x 13 motors).
+function adaptResiduals(motors, goal, gaps, pinch, start) {
+  const q = ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0));
+  const [P, A] = adaptChains(q);
+  // A point moves with each joint before it: d point / d angle = axis x (point - joint).
+  const turn = (d, i, j) => (j <= i - 2 ? cross(A[d][j], sub(P[d][i], P[d][j + 1])) : [0, 0, 0]);
+  const r = [], rows = [];
+  for (let d = 0; d < 5; d++) {
+    for (let n = 0; n < 3; n++) {
+      const i = n + 3, w = ADAPT_POINT_WEIGHTS[d][n];
+      const cols = [0, 1, 2, 3].map((j) => turn(d, i, j));
+      let e = sub(P[d][i], goal[d][n]);
+      if (d === 0) {  // the thumb's shape, from its base, which turns with CMC1
+        e = sub(sub(P[0][i], P[0][2]), goal[0][n]);
+        cols[0] = sub(cols[0], cross(A[0][0], sub(P[0][2], P[0][1])));
+      }
+      for (let x = 0; x < 3; x++) {
+        const row = new Array(20).fill(0);
+        for (let j = 0; j < 4; j++) row[4 * d + j] = w * cols[j][x];
+        r.push(w * e[x]);
+        rows.push(row);
+      }
+    }
   }
-  return clip ? adaptClip(out) : out;  // coupled: only rounding to take off
+  for (let f = 1; f < 5; f++) {  // pinches: the thumb tip as near each fingertip as yours
+    const w = pinch[f - 1], e = sub(sub(P[0][5], P[f][5]), gaps[f - 1]);
+    const thumb = [0, 1, 2, 3].map((j) => turn(0, 5, j)), finger = [0, 1, 2, 3].map((j) => turn(f, 5, j));
+    for (let x = 0; x < 3; x++) {
+      const row = new Array(20).fill(0);
+      for (let j = 0; j < 4; j++) { row[j] = w * thumb[j][x]; row[4 * f + j] = -w * finger[j][x]; }
+      r.push(w * e[x]);
+      rows.push(row);
+    }
+  }
+  const J = rows.map((row) => ADAPT_COUPLING[0].map((_, m) => row.reduce((s, v, k) => s + v * ADAPT_COUPLING[k][m], 0)));
+  for (let m = 0; m < 13; m++) {
+    r.push(ADAPT_PULL * (motors[m] - start[m]));
+    J.push(new Array(13).fill(0).map((_, k) => (k === m ? ADAPT_PULL : 0)));
+  }
+  return [r, J];
+}
+
+// A x = b, by Gaussian elimination with partial pivoting.
+function solveLinear(A, b) {
+  const n = b.length, M = A.map((row, i) => row.concat([b[i]]));
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let i = c + 1; i < n; i++) if (Math.abs(M[i][c]) > Math.abs(M[p][c])) p = i;
+    [M[c], M[p]] = [M[p], M[c]];
+    for (let i = c + 1; i < n; i++) {
+      const f = M[i][c] / M[c][c];
+      for (let k = c; k <= n; k++) M[i][k] -= f * M[c][k];
+    }
+  }
+  const x = new Array(n).fill(0);
+  for (let i = n - 1; i >= 0; i--) {
+    let s = M[i][n];
+    for (let k = i + 1; k < n; k++) s -= M[i][k] * x[k];
+    x[i] = s / M[i][i];
+  }
+  return x;
+}
+
+// The motor angles that put the ADAPT hand closest to yours, as adapt._solve: Levenberg-Marquardt
+// from the joint-for-joint pose (`wanted`), within the motors' ranges if `clip`.
+const adaptLast = {};  // clip -> [joints, ranges, motors]: the last fit, for the next caller of that frame
+function adaptFitMotors(wanted, joints, clip = true) {
+  const last = adaptLast[clip];
+  if (last && last[0] === joints && last[1] === adaptRanges) return last[2].slice();
+  const [low, high] = clip ? ADAPT_MOTOR_RANGES : [new Array(13).fill(-Infinity), new Array(13).fill(Infinity)];
+  const [goal, gaps, pinch] = adaptTargets(joints);
+  const start = adaptMotors(wanted, clip);
+  let m = start, [r, J] = adaptResiduals(m, goal, gaps, pinch, start);
+  let cost = r.reduce((s, v) => s + v * v, 0), damping = 1e-3, grow = 2;
+  for (let it = 0; it < ADAPT_ITERATIONS; it++) {
+    const g = J[0].map((_, a) => J.reduce((s, row, k) => s + row[a] * r[k], 0));
+    const H = J[0].map((_, a) => J[0].map((__, b) => J.reduce((s, row) => s + row[a] * row[b], 0)));
+    const free = [];
+    for (let k = 0; k < 13; k++) if (!((m[k] <= low[k] && g[k] > 0) || (m[k] >= high[k] && g[k] < 0))) free.push(k);
+    const Hf = free.map((a, i) => free.map((b, j) => H[a][b] + (i === j ? damping * (H[a][a] + 1e-9) : 0)));
+    const x = solveLinear(Hf, free.map((a) => -g[a]));
+    const step = new Array(13).fill(0);
+    free.forEach((a, i) => { step[a] = x[i]; });
+    const trial = m.map((v, k) => Math.min(Math.max(v + step[k], low[k]), high[k]));
+    const [r2, J2] = adaptResiduals(trial, goal, gaps, pinch, start);
+    const cost2 = r2.reduce((s, v) => s + v * v, 0);
+    if (cost2 < cost) {
+      const moved = trial.map((v, k) => v - m[k]);
+      const predicted = cost - r.reduce((s, v, k) => s + (v + J[k].reduce((t, c, a) => t + c * moved[a], 0)) ** 2, 0);
+      const gain = predicted > 0 ? (cost - cost2) / predicted : 0;
+      damping *= Math.max(1 / 3, 1 - (2 * gain - 1) ** 3);
+      grow = 2;
+      [m, r, J, cost] = [trial, r2, J2, cost2];
+      if (Math.max(...moved.map(Math.abs)) < 1e-9) break;
+    } else {  // no better: smaller steps
+      damping *= grow;
+      grow *= 2;
+      if (damping > 1e10) break;
+    }
+  }
+  adaptLast[clip] = [joints, adaptRanges, m];
+  return m.slice();
 }
 
 // The 13 motor angles: the least-squares fit through the coupling, as adapt.motor_angles. Each
@@ -511,6 +674,7 @@ function connect() {
     const msg = JSON.parse(event.data);
     if (msg.status) status = msg.status;
     if (msg.status && msg.status.human_ranges) adaptRanges = msg.status.human_ranges;
+    if (msg.status && typeof msg.status.adapt_fit === "boolean") adaptFit = msg.status.adapt_fit;
     if (msg.frame) {
       frame = msg.frame;
       lastFrameAt = performance.now();

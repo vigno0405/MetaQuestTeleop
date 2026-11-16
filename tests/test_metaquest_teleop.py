@@ -285,6 +285,7 @@ def test_the_3d_view_knows_whether_the_adapt_hand_is_on():
     assert seen == {True: True, False: False}
     # and your ranges as they are now, for the view to map your hand as the library does
     assert status["human_ranges"] == [list(map(float, adapt.HUMAN_RANGES[j])) for j in adapt.JOINTS]
+    assert status["adapt_fit"] is True  # and whether it fits the ADAPT hand to yours
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
@@ -411,16 +412,16 @@ def test_your_ranges_can_be_changed_at_any_time():
     from metaquest_teleop import adapt
 
     hand = synthetic_hand("right", np.array([[0.4, 0.5, 0.3, 0.3]] + [[0.4, 0.0, 0.5, 0.3]] * 4), _pose(np.random.default_rng(2)))
-    before = adapt.joint_angles(hand)[5]  # index MCP, from your 0..90°
+    before = adapt.joint_angles(hand, fit=False)[5]  # index MCP, from your 0..90°, joint for joint
     saved = adapt.HUMAN_RANGES["index_MCP"]
     try:
         adapt.HUMAN_RANGES["index_MCP"] = (0, 45)  # your index bends half as much: the same bend is twice
-        assert adapt.joint_angles(hand)[5] == pytest.approx(min(2 * before, adapt.JOINT_LIMITS["index_MCP"][1]))
+        assert adapt.joint_angles(hand, fit=False)[5] == pytest.approx(min(2 * before, adapt.JOINT_LIMITS["index_MCP"][1]))
     finally:
         adapt.HUMAN_RANGES["index_MCP"] = saved
 
 
-def test_the_adapt_hand_does_what_yours_does():
+def test_joint_for_joint_the_adapt_hand_does_what_yours_does():
     # The real hand's own poses (HumanManipulationVMC PoseControl, after Santello et al. 1998): an
     # open hand gives home, all zeros; a power grasp about PC1; a pinch about PC2. And more of
     # yours gives more of the ADAPT's, joint by joint.
@@ -436,7 +437,7 @@ def test_the_adapt_hand_does_what_yours_does():
         ([[0.9, 0.2, 0.44, 0.52], [0.45, 0.0, 0.87, 0.61], [0.45, 0.0, 1.0, 0.7]] + [power] * 2,
          [50, 12, 35, 25, 25, 40, 25, 50, 55, 65]),  # pinch: PC2
     ):
-        got = np.degrees(adapt.joint_angles(hand(angles))[pick])
+        got = np.degrees(adapt.joint_angles(hand(angles), fit=False)[pick])
         assert np.all(np.abs(got[4:] - reference[4:]) < 6), (got, reference)  # the fingers
         assert np.all(np.abs(got[:4] - reference[:4]) < 20), (got, reference)  # the thumb
 
@@ -445,7 +446,7 @@ def test_the_adapt_hand_does_what_yours_does():
         for v in values:
             angles = np.array([[0.4, 0.5, 0.3, 0.3]] + [[0.4, 0.0, 0.5, 0.3]] * 4)
             angles[index] = v
-            out.append(adapt.joint_angles(hand(angles))[joint])
+            out.append(adapt.joint_angles(hand(angles), fit=False)[joint])
         return np.diff(out)
 
     assert np.all(follows((1, 0), 5, np.linspace(0, 1.4, 8)) > 0)  # index MCP
@@ -453,6 +454,87 @@ def test_the_adapt_hand_does_what_yours_does():
     assert np.all(follows((0, 3), 3, np.linspace(0, 1.2, 8)) > 0)  # thumb IP
     assert np.all(follows((0, 0), 0, np.linspace(0.2, 1.4, 8)) > 0)  # the thumb in front of the palm: CMC1
     assert np.all(follows((0, 1), 1, np.linspace(1.0, 0.2, 8)) > 0)  # the thumb towards the fingers: CMC2
+
+
+def _adapt_shaped_hand(joints):
+    """A hand whose joints are where the ADAPT hand's are for these joint angles: the wrist at the
+    ADAPT base, turned so that your wrist's axes read as the ADAPT's."""
+    from metaquest_teleop import adapt
+    from metaquest_teleop.hands import Hand
+
+    pts = adapt.positions(joints)
+    positions = np.zeros((25, 3))
+    positions[1:5] = pts["thumb"][2:6]  # CMC (the ADAPT's CMC2), MCP, IP, tip
+    for f, digit in enumerate(adapt.DIGITS[1:], start=1):
+        positions[5 * f:5 * f + 5] = pts[digit][1:6]  # base, MCP, PIP, DIP, tip
+    quaternions = np.tile([1.0, 0.0, 0.0, 0.0], (25, 1))  # a half turn about x: the ADAPT axes
+    return Hand("right", positions, quaternions)
+
+
+def _distance_to(hand, joints):
+    """mm: how far the ADAPT hand is from yours, as the fit measures it: the fingers' PIP, DIP and
+    tips (your knuckles on the ADAPT's), and the thumb's shape from its base."""
+    from metaquest_teleop import adapt
+
+    goal, _, _ = adapt._targets(hand)
+    points, _ = adapt._chains(joints)
+    ours = points[:, 3:6].copy()
+    ours[0] -= points[0, 2]
+    gaps = np.linalg.norm(ours - goal, axis=-1) * 1000
+    return gaps[1:].mean(), gaps[0].mean()
+
+
+def test_the_fit_puts_the_adapt_hand_where_yours_is():
+    from dataclasses import replace
+
+    from metaquest_teleop import adapt
+
+    # A hand shaped as an ADAPT pose gets that pose back (a hair off: the pull towards the
+    # joint-for-joint pose, which picks one pose when several fit as well).
+    rng = np.random.default_rng(40)
+    low, high = adapt._MOTOR_LOW, adapt._MOTOR_HIGH
+    for _ in range(10):
+        motors = rng.uniform(low, high)
+        motors[4] = 0.0  # no spread: your knuckles are then the ADAPT's own
+        joints = adapt.COUPLING @ motors
+        hand = _adapt_shaped_hand(joints)
+        assert np.degrees(np.abs(adapt.joint_angles(hand) - joints)).max() < 1.0
+        fingers, thumb = _distance_to(hand, adapt.joint_angles(hand))
+        assert fingers < 0.5 and thumb < 0.5
+
+    # Your hand: the fit is nearer to it than joint for joint is, within the same limits.
+    rng = np.random.default_rng(41)
+    for _ in range(20):
+        hand = synthetic_hand("right", _angles(rng), _pose(rng))
+        fitted, direct = _distance_to(hand, adapt.joint_angles(hand)), _distance_to(hand, adapt.joint_angles(hand, fit=False))
+        assert sum(fitted) < sum(direct)
+
+    # A pinch: your thumb tip on your index tip brings the ADAPT's together.
+    wrist = Pose(np.zeros(3), np.array([0.0, 0.0, 0.0, 1.0]))
+    for target in (9, 14):
+        h = synthetic_hand("right", np.array([[0.9, 0.2, 0.44, 0.52], [0.6, 0, 0.7, 0.3], [0.6, 0, 0.7, 0.3]]
+                                             + [[1.0, 0.0, 1.48, 0.96]] * 2), wrist)
+        p = h.positions.copy()
+        p[4] = p[target]
+        h = replace(h, positions=p)
+        tips = {d: points[-1] for d, points in adapt.positions(adapt.joint_angles(h)).items()}
+        direct = {d: points[-1] for d, points in adapt.positions(adapt.joint_angles(h, fit=False)).items()}
+        finger = adapt.DIGITS[target // 5]
+        gap, before = (np.linalg.norm(t["thumb"] - t[finger]) * 1000 for t in (tips, direct))
+        assert gap < 15 and gap < before, (gap, before)
+
+    # More of yours, more of the ADAPT's.
+    def follows(index, joint, values):
+        out = []
+        for v in values:
+            angles = np.array([[0.4, 0.5, 0.3, 0.3]] + [[0.4, 0.0, 0.5, 0.3]] * 4)
+            angles[index] = v
+            out.append(adapt.joint_angles(synthetic_hand("right", angles, wrist))[joint])
+        return np.diff(out)
+
+    for index, joint in (((1, 0), 5), ((2, 2), 10)):  # index MCP; middle PIP (and DIP)
+        steps = follows(index, joint, np.linspace(0, 1.4, 8))
+        assert np.all(steps >= -1e-9) and steps.sum() > 0.5  # never back, from its 0 limit up
 
 
 def test_adapt_joints_are_a_pose_the_adapt_hand_can_take():
@@ -463,18 +545,21 @@ def test_adapt_joints_are_a_pose_the_adapt_hand_can_take():
     rng = np.random.default_rng(31)
     low, high = np.array([adapt.JOINT_LIMITS[j] for j in adapt.JOINTS]).T
     kept = 0
-    for _ in range(200):
+    for k in range(200):
         hand = synthetic_hand("right", _angles(rng), _pose(rng))
-        joints = adapt.joint_angles(hand)
-        motors = adapt.motor_angles(joints)
-        assert np.allclose(adapt.COUPLING @ motors, joints, atol=1e-12)  # the motors make exactly this pose
-        assert np.all((low - 1e-12 <= joints) & (joints <= high + 1e-12))
-        assert np.allclose(motors, adapt.motor_angles(hand), atol=1e-12)
+        for fit in (True, False) if k < 40 else (False,):
+            joints = adapt.joint_angles(hand, fit=fit)
+            motors = adapt.motor_angles(joints)
+            assert np.allclose(adapt.COUPLING @ motors, joints, atol=1e-12)  # the motors make exactly this pose
+            assert np.all((low - 1e-12 <= joints) & (joints <= high + 1e-12))
+            assert np.allclose(motors, adapt.motor_angles(hand, fit=fit), atol=1e-12)
+            for f in range(1, 5):
+                assert joints[4 * f + 2] == pytest.approx(joints[4 * f + 3], abs=1e-12)  # DIP mimics PIP
+        joints = adapt.joint_angles(hand, fit=False)
         wanted = adapt.joint_angles(hand, clip=False, coupled=False)  # yours, one by one
         for f in range(1, 5):
             pip, dip = 4 * f + 2, 4 * f + 3
-            assert joints[pip] == pytest.approx(joints[dip], abs=1e-12)
-            if low[pip] < joints[pip] < high[pip]:  # no limit in the way: the mean of the two
+            if low[pip] < joints[pip] < high[pip]:  # joint for joint, no limit in the way: the mean of the two
                 assert 2 * joints[pip] == pytest.approx(wanted[pip] + wanted[dip], abs=1e-9)
                 kept += 1
     assert kept > 100
@@ -507,6 +592,7 @@ def test_adapt_joints_take_your_angles_and_the_motors_reduce_them():
     clipped = adapt.COUPLING @ adapt.motor_angles(np.full(20, 5.0))  # clip: every joint in range
     assert np.all(clipped <= np.array([adapt.JOINT_LIMITS[j][1] for j in adapt.JOINTS]) + 1e-9)
     assert np.allclose(adapt.motor_angles(hand), adapt.motor_angles(adapt.joint_angles(hand)))
+    assert np.allclose(adapt.motor_angles(hand, fit=False), adapt.motor_angles(joints, clip=True))
 
     # By default: the pose the motors make, every joint within its limits.
     low, high = np.array([adapt.JOINT_LIMITS[j] for j in adapt.JOINTS]).T
@@ -548,9 +634,12 @@ def test_the_3d_views_adapt_hand_is_the_python_one(tmp_path):
 const hands = {json.dumps([[h.angles.tolist(), np.hstack([h.positions, h.quaternions]).tolist()] for h in hands])};
 const joints = hands.map(([a, j]) => adaptJoints(a, j));
 const raw = hands.map(([a, j]) => adaptJoints(a, j, false));
+const direct = hands.map(([a, j]) => adaptJoints(a, j, true, true, false));
+const directRaw = hands.map(([a, j]) => adaptJoints(a, j, false, true, false));
 process.stdout.write(JSON.stringify({{
-  coupling: ADAPT_COUPLING, joints, raw,
+  coupling: ADAPT_COUPLING, joints, raw, direct, directRaw,
   motors: joints.map((j) => adaptMotors(j)), free: raw.map((j) => adaptMotors(j, false)),
+  directMotors: direct.map((j) => adaptMotors(j)), directFree: directRaw.map((j) => adaptMotors(j, false)),
   shapes: raw.map(adaptPositions),
   wanted: hands.map(([a, j]) => adaptJoints(a, j, true, false)),
   wantedRaw: hands.map(([a, j]) => adaptJoints(a, j, false, false)),
@@ -560,15 +649,21 @@ process.stdout.write(JSON.stringify({{
 
     assert np.allclose(out["coupling"], adapt.COUPLING)
     for k, hand in enumerate(hands):
-        assert np.allclose(out["joints"][k], adapt.joint_angles(hand), atol=1e-12)
-        assert np.allclose(out["raw"][k], adapt.joint_angles(hand, clip=False), atol=1e-12)
-        assert np.allclose(out["motors"][k], adapt.motor_angles(hand), atol=1e-12)
-        assert np.allclose(out["free"][k], adapt.motor_angles(hand, clip=False), atol=1e-12)
+        # the fit: the same solver, so the same pose (to its rounding)
+        assert np.allclose(out["joints"][k], adapt.joint_angles(hand), atol=1e-9)
+        assert np.allclose(out["raw"][k], adapt.joint_angles(hand, clip=False), atol=1e-9)
+        assert np.allclose(out["motors"][k], adapt.motor_angles(hand), atol=1e-9)
+        assert np.allclose(out["free"][k], adapt.motor_angles(hand, clip=False), atol=1e-9)
+        # joint for joint
+        assert np.allclose(out["direct"][k], adapt.joint_angles(hand, fit=False), atol=1e-12)
+        assert np.allclose(out["directRaw"][k], adapt.joint_angles(hand, clip=False, fit=False), atol=1e-12)
+        assert np.allclose(out["directMotors"][k], adapt.motor_angles(hand, fit=False), atol=1e-12)
+        assert np.allclose(out["directFree"][k], adapt.motor_angles(hand, clip=False, fit=False), atol=1e-12)
         assert np.allclose(out["wanted"][k], adapt.joint_angles(hand, coupled=False), atol=1e-12)
         assert np.allclose(out["wantedRaw"][k], adapt.joint_angles(hand, clip=False, coupled=False), atol=1e-12)
         shape = out["shapes"][k]
         for digit, points in adapt.positions(adapt.joint_angles(hand, clip=False)).items():
-            assert np.allclose(shape[digit], points, atol=1e-12)
+            assert np.allclose(shape[digit], points, atol=1e-9)
 
 
 def test_hands_must_be_right_left_or_both():

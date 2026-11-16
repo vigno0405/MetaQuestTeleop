@@ -318,6 +318,13 @@ class QuestHands:
 
         return [[float(v) for v in adapt.HUMAN_RANGES[j]] for j in adapt.JOINTS]
 
+    @staticmethod
+    def _adapt_fit() -> bool:
+        """adapt.FIT as it is now: the 3D view fits the ADAPT hand to yours, or maps it joint for joint."""
+        from . import adapt  # noqa: PLC0415 -- adapt imports this module, through fake
+
+        return bool(adapt.FIT)
+
     def _view_status(self) -> dict:
         rates = self.rates()
         return {"page": self.connected, "url": self.url, "use_adb": self.use_adb,
@@ -326,7 +333,7 @@ class QuestHands:
                 "hands": self.hands,
                 "teleop": None if self.teleop is None else self.teleop.command().reason or "moving",
                 "adapt": None if self.teleop is None else self.teleop.adapt,
-                "human_ranges": self._human_ranges(),
+                "human_ranges": self._human_ranges(), "adapt_fit": self._adapt_fit(),
                 **{key: self.headset.get(key) for key in ("session", "mode", "fps", "space")}}
 
     # -- frames from the headset ------------------------------------------------------------- #

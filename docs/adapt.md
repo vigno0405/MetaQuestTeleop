@@ -5,8 +5,9 @@ hide-toc: true
 # ADAPT Hand
 
 `metaquest_teleop.adapt` turns your hand into the ADAPT hand's 20 joint angles and 13 motor
-angles, within the robot's limits, and gives the pose of your wrist. Its geometry, joint ranges
-and motor order are those of `virtualmodelcontrol.robots.adapt`.
+angles: the pose, within the robot's limits, that puts the ADAPT hand closest to yours. It also
+gives the pose of your wrist. Its geometry, joint ranges and motor order are those of
+`virtualmodelcontrol.robots.adapt`.
 
 ## Try it
 
@@ -47,11 +48,38 @@ the motors. The ADAPT wrist stays at (0, 0): [below](#the-wrist).
 and `/metaquest/adapt/motors` ([ROS 2](ros.md)). They hold still while you pinch your left hand,
 or while a hand is not seen ([teleoperation](teleop.md)). `--no-adapt` leaves them out.
 
-## Joints: from your hand
+## Joints: the pose closest to yours
 
-Each ADAPT joint follows the same joint of yours, your range of motion stretched onto its own:
-the angle of yours in the first column of `adapt.HUMAN_RANGES` gives its lowest angle, the one in
-the second its highest, linearly in between.
+The ADAPT hand is not your hand: its bones have other lengths, its thumb sits elsewhere on the
+palm, and its joints turn about other axes. So its joints do not copy your angles: they take the
+pose that puts its hand where yours is, through its forward kinematics:
+
+- **your knuckles on its knuckles**: your hand, scaled and shifted so that your four knuckles
+  (index to pinky) fall on the ADAPT's;
+- **each finger's PIP, DIP and tip on yours**, the tip counting most;
+- **its thumb shaped as yours**: its MCP, IP and tip from the thumb's own base, as yours are from
+  yours, at the ADAPT thumb's length. The thumbs' bases sit apart on the palm, so the thumb
+  matches by its shape, not by where it is;
+- **a pinch closes**: when your thumb tip comes near a fingertip, the ADAPT's thumb tip goes as
+  near that fingertip, which then counts the most.
+
+Only poses the ADAPT hand can take count: those of its 13 motors (each DIP mimics its PIP, one
+motor spreads the fingers: [below](#a-pose-the-adapt-hand-can-take)), within its limits. Where a
+limit stops a joint, the others make up for it as best they can: the thumb's CMC2, for one,
+stops at 29°, and its CMC1, MCP and IP then bring the thumb tip as near yours as they can.
+
+The fit is a least-squares fit (Levenberg-Marquardt) over the 13 motors. It starts from the
+joint-for-joint pose (below), takes a few milliseconds, and pulls very slightly towards that
+pose, which picks one pose when several fit as well. A hand shaped exactly as an ADAPT pose
+gets that pose back.
+
+## Joints: joint for joint
+
+`adapt.joint_angles(hand, fit=False)`, `adapt.FIT = False`, or `metaquest-teleop --no-adapt-fit`
+maps the ADAPT hand joint for joint instead: each ADAPT joint follows the same joint of yours,
+your range of motion stretched onto its own. The angle of yours in the first column of
+`adapt.HUMAN_RANGES` gives its lowest angle, the one in the second its highest, linearly in
+between. The fit starts from this pose.
 
 | ADAPT joint | Follows | Your range (°) | Its range (°) |
 |---|---|---|---|
@@ -74,7 +102,7 @@ from metaquest_teleop import adapt
 adapt.HUMAN_RANGES["thumb_MCP"] = (0, 55)  # your thumb bends 55° at most: that is its 86°
 ```
 
-The 3D view of `metaquest-teleop` uses the same ranges.
+The 3D view of `metaquest-teleop` uses the same ranges, and fits or not as the library does.
 
 The ADAPT thumb's CMC joints are a gimbal: CMC2 swings its first bone from sideways towards the
 fingers, then CMC1 turns it about the hand's long axis towards the palm's front. Your thumb's
@@ -85,14 +113,15 @@ first bone is read the same way, so its CMC1 and CMC2 follow yours.
 The ADAPT hand's joints are coupled, as in VirtualModelControl and HumanManipulationVMC:
 
 - **each finger's DIP mimics its PIP**: one motor turns both through the same cable, by the
-  same angle. So PIP and DIP are always equal. Both take the mean of yours, which keeps your
+  same angle. So PIP and DIP are always equal. The fit puts them where your finger's joints and
+  tip are best matched; joint for joint, both take the mean of yours, which keeps your
   fingertip pointing where it points (PIP + DIP is the same).
 - **one motor spreads the index, ring and pinky** together, the middle finger not at all. The
   spreads take the best fit of yours.
 
 So `adapt.joint_angles(hand)` is always a pose the robot can take: the dashboard, `--print_joints`
 and `/metaquest/adapt/joint_states` show what the robot does. `joint_angles(hand, coupled=False)`
-gives the angles before that, joint by joint, PIP and DIP apart.
+gives the joint-for-joint angles before that, joint by joint, PIP and DIP apart.
 
 ## Limits
 
@@ -105,8 +134,8 @@ Every joint is kept within its range, as the robot can go:
 | thumb IP; each finger's PIP and DIP | 0 to 69° |
 | spread: index / middle / ring and pinky | −17 to 0° / none / 0 to 17° |
 
-`adapt.JOINT_LIMITS` has them in radians. `joint_angles(hand, clip=False)` gives the angles
-before the limits.
+`adapt.JOINT_LIMITS` has them in radians. `joint_angles(hand, clip=False)` fits without them:
+the pose of the ADAPT hand closest to yours if its joints went anywhere.
 
 ## Motors: 13 for 20 joints
 
