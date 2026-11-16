@@ -21,7 +21,5 @@ notifications; `adb kill-server` then `adb devices` asks again.
 **Linux: `adb devices` says `no permissions`.** Run
 `sudo apt install android-sdk-platform-tools-common`, then unplug and replug the headset.
 
-**`ROS 2 not found`, or `ROS 2 Jazzy runs on Python 3.12, and this is Python 3.10`.** Source
-ROS and run with the Python your ROS uses (3.10 for Humble, 3.12 for Jazzy), as in
-[ROS 2](ros.md): a conda environment with another Python cannot load ROS. `--no-ros` hides the
-message.
+**`ROS 2 not found`.** Source ROS first, in the same terminal: `source /opt/ros/jazzy/setup.bash`
+(or humble), as in [ROS 2](ros.md). `--no-ros` hides the message.

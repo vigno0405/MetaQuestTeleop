@@ -5,25 +5,18 @@ on ROS 2 Humble and Jazzy with nothing to build.
 
 ## Run it
 
-It needs the Python your ROS uses: 3.10 for Humble, 3.12 for Jazzy. Once:
+Source ROS, then run it from any Python environment, a conda one too:
 
 ```bash
 source /opt/ros/jazzy/setup.bash          # or humble
-python3 -m venv --system-site-packages ~/venvs/quest-ros
-~/venvs/quest-ros/bin/pip install metaquest-teleop
+metaquest-teleop
 ```
 
-(If `python3 -m venv` fails, `sudo apt install python3-venv` first.) Then, every time:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-~/venvs/quest-ros/bin/metaquest-teleop
-```
-
-It publishes whenever it finds ROS 2: `ros2 topic list` shows the `/metaquest/...` topics.
-Without ROS, in a conda environment for example, it runs as usual and says it is not publishing.
-`--ros` makes ROS required, `--no-ros` turns it off, and `--no-adapt` leaves out the ADAPT
-hand's topics.
+It says `publishing on ROS 2`, and `ros2 topic list` shows the `/metaquest/...` topics. ROS 2
+runs on its own Python (3.10 for Humble, 3.12 for Jazzy); from another one, such as a conda
+environment with Python 3.10, it publishes through a small helper with ROS's Python, and says
+so. Without ROS it runs as usual and says it is not publishing. `--ros` makes ROS required,
+`--no-ros` turns it off, and `--no-adapt` leaves out the ADAPT hand's topics.
 
 ## Topics
 
@@ -88,3 +81,6 @@ with QuestHands() as quest:
     ...
     ros.close()
 ```
+
+From any Python, as the command. To publish from your own rclpy node, give it as `node=`: that
+needs ROS's Python.

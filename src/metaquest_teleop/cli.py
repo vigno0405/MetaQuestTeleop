@@ -12,9 +12,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
-import os
-import re
 import sys
 import time
 import webbrowser
@@ -101,27 +98,6 @@ def print_joints(quest: QuestHands, teleop: Teleop) -> None:
         time.sleep(1.0 / PRINT_HZ)
 
 
-ROS_DOCS = "https://vigno0405.github.io/MetaQuestTeleop/ros.html"
-
-
-def ros_unavailable(exc: Exception) -> tuple[str, str]:
-    """Why this Python cannot publish on ROS 2, and what to do about it, in a few words each."""
-    here = "{}.{}".format(*sys.version_info[:2])
-    try:
-        spec = importlib.util.find_spec("rclpy")
-    except (ImportError, ValueError):
-        spec = None
-    if spec is None:
-        return "ROS 2 not found", ("To publish, source ROS (for example `source /opt/ros/jazzy/setup.bash`) "
-                                   f"and run with the Python ROS uses: {ROS_DOCS}")
-    ros = re.search(r"python(\d+\.\d+)", spec.origin or "")
-    if ros and ros[1] != here:  # for example ROS Jazzy (Python 3.12) from a conda env with 3.10
-        name = " ".join(filter(None, ("ROS 2", os.environ.get("ROS_DISTRO", "").capitalize())))
-        return (f"{name} runs on Python {ros[1]}, and this is Python {here}",
-                f"To publish, run it with Python {ros[1]}: {ROS_DOCS}")
-    return f"ROS 2 did not load ({' '.join(str(exc).split())})", f"See {ROS_DOCS}"
-
-
 def _udp_address(text: str) -> tuple[str, int]:
     host, _, port = text.rpartition(":")
     try:
@@ -152,25 +128,27 @@ def main() -> int:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args()
 
-    RosPublisher = None  # noqa: N806
-    if args.ros != "off":
-        try:
-            from .ros import RosPublisher  # noqa: PLC0415 -- ROS only when there is ROS
-        except Exception as exc:  # noqa: BLE001 -- no ROS, or one for another Python
-            why, how = ros_unavailable(exc)
-            if args.ros == "on":
-                print(f"{why}: cannot publish. {how}")
-                return 1
-            print(f"{why}: not publishing (--no-ros hides this). {how}")
     try:
         quest = QuestHands(args.port, adb=not args.no_adb, udp=args.udp, hands=args.hands).start()
     except OSError as exc:
         print(f"Could not serve on port {args.port}: {exc}. Is another copy already running?")
         return 1
     teleop = Teleop(quest, adapt=not args.no_adapt)  # the other hand pauses the robot
-    ros = RosPublisher(quest, adapt=not args.no_adapt, teleop=teleop) if RosPublisher is not None else None
-    if ros is not None:
-        print("publishing on ROS 2: /metaquest/... (ros2 topic list)", flush=True)
+    ros = None
+    if args.ros != "off":
+        from .ros import RosPublisher, RosUnavailable  # noqa: PLC0415
+
+        try:
+            ros = RosPublisher(quest, adapt=not args.no_adapt, teleop=teleop)
+        except RosUnavailable as exc:
+            if args.ros == "on":
+                print(f"{exc}: cannot publish. {exc.how}")
+                quest.stop()
+                return 1
+            print(f"{exc}: not publishing (--no-ros hides this). {exc.how}")
+        else:
+            through = f" through {ros.python}, the Python ROS 2 runs on" if ros.python else ""
+            print(f"publishing on ROS 2{through}: /metaquest/... (ros2 topic list)", flush=True)
     if args.view:
         webbrowser.open(quest.view_url)
     try:

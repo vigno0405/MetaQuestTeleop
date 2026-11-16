@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- ROS 2 from any Python: from one that cannot load ROS 2, such as a conda environment with
+  Python 3.10 and ROS 2 Jazzy on 3.12, `metaquest-teleop` now publishes anyway, through a small
+  helper process with the Python ROS 2 runs on. `RosPublisher` does the same; its `python`
+  names the Python to publish with.
+
 ## 0.5.2 (2026-11-16)
 
 - Restart `metaquest-teleop` while the headset streams and it goes on without pressing Start

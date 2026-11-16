@@ -525,24 +525,41 @@ def test_a_restarted_server_knows_the_headset_is_already_streaming():
     assert "streaming at 120 Hz" in dashboard and "press Start in the headset" not in dashboard
 
 
-def test_without_ros_it_says_why_in_a_few_words(monkeypatch):
+def test_without_ros_here_it_finds_the_python_ros_runs_on(monkeypatch, tmp_path):
     import importlib.util
-    import sys
+    import os
     from types import SimpleNamespace
 
-    from metaquest_teleop.cli import ros_unavailable
+    from metaquest_teleop import ros
 
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
-    assert ros_unavailable(ImportError("No module named 'rclpy'"))[0] == "ROS 2 not found"
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)  # ROS not sourced
+    assert ros.ros_python() is None
+    assert str(ros._unavailable(ImportError("No module named 'rclpy'"))) == "ROS 2 not found"
 
-    # A ROS for another Python: Jazzy (3.12) from a conda environment with Python 3.10, say.
-    here, other = f"3.{sys.version_info.minor}", f"3.{sys.version_info.minor + 1}"
-    origin = f"/opt/ros/jazzy/lib/python{other}/site-packages/rclpy/__init__.py"
+    # ROS 2 for another Python than this one: Jazzy, on 3.12, from a conda env with 3.10, say.
+    origin = "/opt/ros/jazzy/lib/python3.99/site-packages/rclpy/__init__.py"
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: SimpleNamespace(origin=origin))
     monkeypatch.setenv("ROS_DISTRO", "jazzy")
-    why, how = ros_unavailable(ImportError("No module named 'rclpy._rclpy_pybind11'\nThe C extension isn't present"))
-    assert why == f"ROS 2 Jazzy runs on Python {other}, and this is Python {here}"
-    assert how.startswith(f"To publish, run it with Python {other}")
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert ros.ros_python() is None  # no Python 3.99 on this computer
+    assert str(ros._unavailable(ImportError("..."))) == "ROS 2 Jazzy runs on Python 3.99, which is not found"
+    python = tmp_path / ("python3.99.exe" if os.name == "nt" else "python3.99")
+    python.write_text("")
+    python.chmod(0o755)
+    assert os.path.normcase(ros.ros_python()) == os.path.normcase(str(python))
+
+
+def test_a_helper_that_cannot_load_ros_says_why():
+    import importlib.util
+    import sys
+
+    if importlib.util.find_spec("rclpy") is not None:
+        pytest.skip("ROS 2 is here")
+    from metaquest_teleop.ros import RosPublisher, RosUnavailable
+
+    with QuestHands(_free_port(), adb=False) as quest:
+        with pytest.raises(RosUnavailable, match=r"did not start with .*rclpy"):
+            RosPublisher(quest, python=sys.executable)
 
 
 def test_print_joints_shows_the_hands_angles_and_the_adapt_ones():
@@ -561,7 +578,12 @@ def test_print_joints_shows_the_hands_angles_and_the_adapt_ones():
     assert "CMC1" in joints_header("adapt") and "base spread middle tip" in joints_header("hand")
 
 
-def test_ros_topics_carry_the_right_hand_and_the_adapt_hand():
+@pytest.mark.parametrize("through", ["this Python", "a helper"])
+def test_ros_topics_carry_the_right_hand_and_the_adapt_hand(through):
+    # From this Python, or through a helper process: what a Python that cannot load ROS 2 does
+    # (a conda environment with Python 3.10, and ROS 2 Jazzy on 3.12); here with this same Python.
+    import sys
+
     rclpy = pytest.importorskip("rclpy")
     from geometry_msgs.msg import PoseArray, PoseStamped
     from sensor_msgs.msg import JointState
@@ -588,7 +610,11 @@ def test_ros_topics_carry_the_right_hand_and_the_adapt_hand():
             listener.create_subscription(kind, topic, lambda msg, t=topic: keep(msg, t), 10)
         with QuestHands(port, adb=False) as quest:  # the right hand only, by default
             from metaquest_teleop import Teleop
-            ros = RosPublisher(quest, teleop=Teleop(quest))
+            ros = RosPublisher(quest, teleop=Teleop(quest), python=sys.executable if through == "a helper" else None)
+            assert (ros.python is None) == (through == "this Python")
+            deadline = time.monotonic() + 10.0
+            while "/metaquest/teleop/hold" not in first and time.monotonic() < deadline:  # holding, before frames
+                rclpy.spin_once(listener, timeout_sec=0.05)
             headset = threading.Thread(target=lambda: asyncio.run(
                 stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=3.0, hands=("left", "right"))))
             headset.start()
