@@ -45,11 +45,13 @@ def main() -> int:
     parser.add_argument("--no-adb", action="store_true", help="do not set up the USB link (adb reverse) automatically")
     parser.add_argument("--plain", action="store_true", help="one status line per second instead of the dashboard")
     parser.add_argument("--view", action="store_true", help="also open the 3D view of the hands in a browser")
+    parser.add_argument("--hands", choices=("right", "left", "both"), default="right",
+                        help="the hands to stream (default right)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args()
 
     try:
-        quest = QuestHands(args.port, adb=not args.no_adb, udp=args.udp).start()
+        quest = QuestHands(args.port, adb=not args.no_adb, udp=args.udp, hands=args.hands).start()
     except OSError as exc:
         print(f"Could not serve on port {args.port}: {exc}. Is another copy already running?")
         return 1

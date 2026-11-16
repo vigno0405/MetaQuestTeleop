@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import dataclasses
 import json
 import shutil
 import socket
@@ -24,6 +25,11 @@ VIEW = Path(__file__).with_name("view.html")
 #: The port of the page and the stream unless you choose another.
 DEFAULT_PORT = 8012
 _HANDS_OFFSET = 48
+_KEPT = {  # the hands kept, and their part of a binary frame
+    "right": (("right",), slice(_HANDS_OFFSET + 700, None)),
+    "left": (("left",), slice(_HANDS_OFFSET, _HANDS_OFFSET + 700)),
+    "both": (("left", "right"), slice(_HANDS_OFFSET, None)),
+}
 _VIEW_HZ = 60.0
 
 
@@ -76,6 +82,9 @@ class QuestHands:
         ``(host, port)``: also send every frame there as JSON, over UDP. None for no UDP.
     host
         Who can connect: ``"127.0.0.1"`` is only this computer, ``"0.0.0.0"`` the network.
+    hands
+        The hands to keep: ``"right"`` (the default), ``"left"`` or ``"both"``. The others are
+        reported as not tracked.
 
     Attributes
     ----------
@@ -93,8 +102,11 @@ class QuestHands:
     """
 
     def __init__(self, port: int = DEFAULT_PORT, adb: bool = True,
-                 udp: tuple[str, int] | None = None, host: str = "127.0.0.1") -> None:
-        self.port, self.host, self.udp = port, host, udp
+                 udp: tuple[str, int] | None = None, host: str = "127.0.0.1",
+                 hands: str = "right") -> None:
+        if hands not in _KEPT:
+            raise ValueError(f"hands must be 'right', 'left' or 'both', not {hands!r}")
+        self.port, self.host, self.udp, self.hands = port, host, udp, hands
         self.use_adb = adb
         self.usb_ok, self.usb = False, ("checking" if adb else "not managed (--no-adb)")
         self.headset: dict = {}
@@ -301,6 +313,7 @@ class QuestHands:
         return {"page": self.connected, "url": self.url, "use_adb": self.use_adb,
                 "usb_ok": self.usb_ok, "usb": self.usb, "frames": self.frames,
                 "hz": rates["hz"], "changed_hz": rates["changed_hz"],
+                "hands": self.hands,
                 **{key: self.headset.get(key) for key in ("session", "mode", "fps", "space")}}
 
     # -- frames from the headset ------------------------------------------------------------- #
@@ -311,7 +324,9 @@ class QuestHands:
         except ValueError as exc:
             self._event(f"bad frame: {exc}")
             return
-        hands = data[_HANDS_OFFSET:]
+        sides, part = _KEPT[self.hands]
+        frame = dataclasses.replace(frame, **{s: None for s in ("left", "right") if s not in sides})
+        hands = data[part]
         changed = (frame.left is not None or frame.right is not None) and hands != self._last_hands
         self._last_hands = hands
         with self._cond:

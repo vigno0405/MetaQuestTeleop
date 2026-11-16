@@ -109,12 +109,12 @@ def test_the_server_serves_the_page_and_receives_frames_from_a_headset():
         udp.bind(("127.0.0.1", 0))
         udp.settimeout(3.0)
         received = []
-        with QuestHands(port, adb=False, udp=udp.getsockname()) as quest:
+        with QuestHands(port, adb=False, udp=udp.getsockname(), hands="both") as quest:
             quest.on_frame(received.append)
             page = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=3).read().decode()
             assert "Quest hand stream" in page
-            headset = threading.Thread(
-                target=lambda: asyncio.run(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=1.0)))
+            headset = threading.Thread(target=lambda: asyncio.run(
+                stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=1.0, hands=("left", "right"))))
             headset.start()
             frame = quest.wait(timeout=3.0)
             message = json.loads(udp.recv(65536))
@@ -138,14 +138,16 @@ def test_the_dashboard_renders_with_and_without_hands():
         console = Console(width=120, record=True, file=io.StringIO())
         console.print(render(quest, 120))
         assert "waiting for the page" in console.export_text()
-        headset = threading.Thread(
-            target=lambda: asyncio.run(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=0.6)))
+        headset = threading.Thread(target=lambda: asyncio.run(
+            stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=0.6, hands=("left", "right"))))
         headset.start()
-        quest.wait(timeout=3.0)
+        frame = quest.wait(timeout=3.0)
         console.print(render(quest, 80))
         text = console.export_text()
         headset.join(5.0)
-    assert "LEFT" in text and "RIGHT" in text and "index" in text and "frames/s" in text
+    # The right hand only, by default, even when the headset sends both.
+    assert frame.right is not None and frame.left is None
+    assert "RIGHT" in text and "LEFT" not in text and "index" in text and "frames/s" in text
     assert "3D view" in text and "/view" in text
 
 
@@ -389,3 +391,9 @@ process.stdout.write(JSON.stringify({{
         shape = out["shapes"][k]
         for digit, points in adapt.positions(adapt.joint_angles(hand, clip=False)).items():
             assert np.allclose(shape[digit], points, atol=1e-12)
+
+
+def test_hands_must_be_right_left_or_both():
+    with pytest.raises(ValueError):
+        QuestHands(hands="two")
+    assert QuestHands().hands == "right"

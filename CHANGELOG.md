@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- The right hand only, by default: `QuestHands(hands="right")`, `metaquest-teleop` and
+  `metaquest-teleop-fake`. `hands="both"` (`--hands both`) keeps both, `"left"` the left one.
+- When `adb` is missing, the message says how to install it.
+
 ## 0.3.0 (2026-11-15)
 
 - `metaquest_teleop.adapt`: your hand on the ADAPT hand. `joint_angles` gives its 20 joint

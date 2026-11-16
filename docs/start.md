@@ -47,16 +47,17 @@ To see the hands in 3D, open **http://localhost:8012/view** on your computer, or
 
 ```bash
 metaquest-teleop --no-adb    # terminal 1
-metaquest-teleop-fake        # terminal 2: two hands opening and closing
+metaquest-teleop-fake        # terminal 2: a right hand opening and closing
 ```
 
-`metaquest-teleop-fake --hands right` sends only the right hand.
+`metaquest-teleop-fake --hands both` sends both hands.
 
 ## Options
 
 | Command | |
 |---|---|
 | `metaquest-teleop --view` | also open the 3D view |
+| `metaquest-teleop --hands both` | stream both hands; the default is the right hand only |
 | `metaquest-teleop --port 8013` | use another port |
 | `metaquest-teleop --udp 127.0.0.1:9000` | also send every frame as JSON over UDP |
 | `metaquest-teleop --plain` | one line of text per second instead of the dashboard |

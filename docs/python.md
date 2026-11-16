@@ -12,7 +12,8 @@ with QuestHands() as quest:
 ```
 
 Run it instead of `metaquest-teleop` (both use port 8012), then press Start in the headset as
-usual. The [3D view](view.md) works with it too.
+usual. It keeps the right hand only; `QuestHands(hands="both")` keeps both, and
+`hands="left"` the left one. The [3D view](view.md) works with it too.
 
 ## Getting frames
 

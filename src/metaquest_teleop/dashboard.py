@@ -106,14 +106,15 @@ def render(quest: QuestHands, width: int = 120) -> Group:
     """The dashboard for the current state of ``quest``, as a rich renderable ``width`` wide."""
     frame = quest.latest()
     fresh = frame is not None and time.time() - frame.received < _STALE_S
-    left, right = (frame.left, frame.right) if fresh else (None, None)
-    if width >= 104:
+    sides = ("left", "right") if quest.hands == "both" else (quest.hands,)
+    panels = [_hand(side, frame.hand(side) if fresh else None) for side in sides]
+    if width >= 104 and len(panels) == 2:
         hands = Table.grid(expand=True, padding=(0, 1))
         hands.add_column(ratio=1)
         hands.add_column(ratio=1)
-        hands.add_row(_hand("left", left), _hand("right", right))
+        hands.add_row(*panels)
     else:
-        hands = Group(_hand("left", left), _hand("right", right))
+        hands = Group(*panels)
     return Group(_status(quest), hands, Text("  Ctrl-C to stop", style="dim"))
 
 
