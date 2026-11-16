@@ -51,9 +51,11 @@ WRIST_MOTORS = ("wrist_yaw", "wrist_pitch")
 WRIST_ANGLES = (0.0, 0.0)
 
 #: The range of each joint, (low, high) in radians, as in ``virtualmodelcontrol``. The thumb's CMC2
-#: goes from -70° to 30°: the real hand turned it to -73° in the experiments of HumanManipulationVMC.
+#: goes from -70° to 30° (the real hand turned it to -73° in the experiments of
+#: HumanManipulationVMC), its IP from 0° to 90°.
 JOINT_LIMITS = {
-    "thumb_CMC1": (0.0, 1.5), "thumb_CMC2": (float(np.radians(-70.0)), float(np.radians(30.0))), "thumb_MCP": (0.0, 1.5), "thumb_IP": (0.0, 1.2),
+    "thumb_CMC1": (0.0, 1.5), "thumb_CMC2": (float(np.radians(-70.0)), float(np.radians(30.0))), "thumb_MCP": (0.0, 1.5),
+    "thumb_IP": (0.0, float(np.radians(90.0))),
     "index_spread": (-0.3, 0.0), "index_MCP": (0.0, 1.5), "index_PIP": (0.0, 1.2), "index_DIP": (0.0, 1.2),
     "middle_spread": (0.0, 0.0), "middle_MCP": (0.0, 1.5), "middle_PIP": (0.0, 1.2), "middle_DIP": (0.0, 1.2),
     "ring_spread": (0.0, 0.3), "ring_MCP": (0.0, 1.5), "ring_PIP": (0.0, 1.2), "ring_DIP": (0.0, 1.2),
@@ -69,7 +71,7 @@ JOINT_LIMITS = {
 #: goes the other way round), the thumb's CMC1 is read as the ADAPT's is built (see
 #: :func:`joint_angles`). The thumb's CMC2 is not here: :data:`CMC2_POSES`.
 HUMAN_RANGES = {
-    "thumb_CMC1": (5, 95), "thumb_MCP": (0, 65), "thumb_IP": (0, 40),
+    "thumb_CMC1": (5, 95), "thumb_MCP": (0, 65), "thumb_IP": (0, 45),
     "index_spread": (20, 0), "index_MCP": (0, 90), "index_PIP": (0, 90), "index_DIP": (0, 60),
     "middle_spread": (0, 0), "middle_MCP": (0, 90), "middle_PIP": (0, 90), "middle_DIP": (0, 60),
     "ring_spread": (0, -15), "ring_MCP": (0, 90), "ring_PIP": (0, 90), "ring_DIP": (0, 60),

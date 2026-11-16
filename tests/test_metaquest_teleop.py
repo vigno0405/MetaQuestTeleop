@@ -444,7 +444,7 @@ def test_joint_for_joint_the_adapt_hand_does_what_yours_does():
         assert np.all(np.abs(got[4:] - reference[4:]) < 6), (got, reference)  # the fingers
         assert np.all(np.abs(got[[0, 2]] - np.array(reference)[[0, 2]]) < 20), (got, reference)  # thumb CMC1, MCP
         your_ip = np.degrees(hand(angles).angles[0, 3])  # the thumb's IP: twice yours, up to its limit
-        assert got[3] == pytest.approx(np.clip(your_ip * 68.75 / 40, 0, 68.75), abs=0.01)
+        assert got[3] == pytest.approx(np.clip(2 * your_ip, 0, 90), abs=1e-6)
 
     def follows(index, joint, values):  # the ADAPT joint as your angle there grows
         out = []
@@ -456,7 +456,7 @@ def test_joint_for_joint_the_adapt_hand_does_what_yours_does():
 
     assert np.all(follows((1, 0), 5, np.linspace(0, 1.4, 8)) > 0)  # index MCP
     assert np.all(follows((2, 2), 10, np.linspace(0, 1.4, 8)) > 0)  # middle PIP (and DIP)
-    assert np.all(follows((0, 3), 3, np.linspace(0, 0.6, 8)) > 0)  # thumb IP, below your 40° that is its limit
+    assert np.all(follows((0, 3), 3, np.linspace(0, 0.75, 8)) > 0)  # thumb IP, below your 45° that is its limit
     assert np.all(follows((0, 0), 0, np.linspace(0.2, 1.4, 8)) > 0)  # the thumb in front of the palm: CMC1
 
 

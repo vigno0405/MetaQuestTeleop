@@ -2,8 +2,9 @@
 
 ## 0.10.1 (2026-11-16)
 
-- The ADAPT thumb's IP turns about twice as far as yours: your 0 to 40° gives its whole range,
-  0 to 69° (`adapt.HUMAN_RANGES["thumb_IP"] = (0, 40)`; it was 0 to 80°).
+- The ADAPT thumb's IP goes from 0 to 90°, as in VirtualModelControl (it was 0 to 69°).
+- It turns twice as far as yours: your 0 to 45° gives its whole range
+  (`adapt.HUMAN_RANGES["thumb_IP"] = (0, 45)`; it was 0 to 80°).
 
 ## 0.10.0 (2026-11-16)
 
