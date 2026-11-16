@@ -113,12 +113,14 @@ def _hand(side: str, hand: Hand | None) -> Panel:
                  title_align="left", border_style="green", box=box.ROUNDED)
 
 
-def _adapt_cell(joints: np.ndarray, i: int) -> Text:
-    """One ADAPT joint: bending ones with a bar across their range, sideways ones signed; yellow at a limit."""
+def _adapt_cell(joints: np.ndarray, i: int, held: bool = False) -> Text:
+    """One ADAPT joint: bending ones with a bar across their range, sideways ones signed; yellow at a
+    limit, grey while the robot holds."""
     name = adapt.JOINTS[i]
     low, high = adapt.JOINT_LIMITS[name]
     value = float(joints[i])
-    style = "bold yellow" if any(abs(value - edge) < 1e-6 and edge != 0.0 for edge in (low, high)) else ""
+    at_limit = any(abs(value - edge) < 1e-6 and edge != 0.0 for edge in (low, high))
+    style = "dim" if held else ("bold yellow" if at_limit else "")
     if name.endswith("spread") or name == "thumb_CMC2":  # sideways, either way from straight
         return Text(_deg(np.degrees(value), True), style=style)
     return Text(f"{_bar(np.degrees(value), width=5, full=np.degrees(high))}{_deg(np.degrees(value))}", style=style)
@@ -127,20 +129,23 @@ def _adapt_cell(joints: np.ndarray, i: int) -> Text:
 def _adapt(teleop) -> Panel:
     """The ADAPT hand as the robot gets it: what the teleoperation commands, still while it holds."""
     command = teleop.command()
-    if not command.hold:
-        state = "[green]● moving"
+    held = command.hold
+    if not held:
+        state, border = "[green]● moving", "yellow"
+    elif "pinching" in command.reason:  # on purpose
+        state, border = f"[yellow]● holding its last pose: {command.reason}", "yellow"
     else:
-        state = f"[{'yellow' if 'pinching' in command.reason else 'red'}]● holding: {command.reason}"
+        state, border = f"[grey62]○ holding its last pose: {command.reason}", "grey37"
     title = f"[bold yellow]ADAPT[/]  {state}"
     if command.joints is None:
         return Panel(Text("waiting for both hands", style="dim"), title=title, title_align="left",
-                     border_style="yellow", box=box.ROUNDED)
+                     border_style=border, box=box.ROUNDED)
     joints = np.asarray(command.joints, dtype=float)
     info = Table.grid(padding=(0, 2))
-    info.add_column(style="yellow")
+    info.add_column(style="dim" if held else "yellow")
     if command.wrist is not None:
         p = command.wrist.position
-        info.add_row("arm", f"x {p[0]:+.3f}   y {p[1]:+.3f}   z {p[2]:+.3f}  m")
+        info.add_row("arm", Text(f"x {p[0]:+.3f}   y {p[1]:+.3f}   z {p[2]:+.3f}  m", style="dim" if held else ""))
     info.add_row("wrist", Text.assemble(f"yaw {_deg(0.0)}  pitch {_deg(0.0)}", ("   fixed: a PID holds it", "dim")))
     info.add_row("", "")  # so the table starts on the same line as your hand's
 
@@ -150,11 +155,11 @@ def _adapt(teleop) -> Panel:
     for name in ("spread", "MCP", "PIP", "DIP"):
         table.add_column(name, justify="right" if name == "spread" else "left")
     for d, digit in enumerate(adapt.DIGITS[1:], start=1):
-        table.add_row(digit, *(_adapt_cell(joints, 4 * d + k) for k in range(4)))
+        table.add_row(digit, *(_adapt_cell(joints, 4 * d + k, held) for k in range(4)))
     # The thumb in the same columns: its sideways joint (CMC2) under spread, then its bending ones.
     table.add_row("", *(Text(name, style="dim") for name in ("CMC2", "CMC1", "MCP", "IP")))
-    table.add_row("thumb", *(_adapt_cell(joints, k) for k in (1, 0, 2, 3)))
-    return Panel(Group(info, Text(), table), title=title, title_align="left", border_style="yellow",
+    table.add_row("thumb", *(_adapt_cell(joints, k, held) for k in (1, 0, 2, 3)))
+    return Panel(Group(info, Text(), table), title=title, title_align="left", border_style=border,
                  box=box.ROUNDED)
 
 

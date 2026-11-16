@@ -43,8 +43,12 @@ Some things to try:
   spread sideways. See [the data](data.md#angles).
 - While `metaquest-teleop` runs, the **robot** line says whether a robot would move or hold
   ([teleoperation](teleop.md)).
-- **Robot**, in Room: the amber ADAPT hand, where the robot goes. It sits at your wrist with its
-  own wrist straight, and holds still while the robot holds ([ADAPT Hand](adapt.md)).
+- In **Room**, **Your hand** (the default) or **ADAPT hand**: the ADAPT hand instead of yours,
+  where the robot goes. It sits at your wrist with its own wrist straight, and holds still,
+  faded, while the robot holds; the panel then gives its joints and motors
+  ([ADAPT Hand](adapt.md)).
+- With one hand streamed (the default, the right one), that is the hand shown; with
+  `--hands both`, pick the one to follow.
 
 ## Controls
 

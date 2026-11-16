@@ -16,11 +16,12 @@ Your hand is on the left; the ADAPT hand on the right is where its motors would 
 angles are held at the robot's limit. While `metaquest-teleop` runs, the same view is at
 **http://localhost:8012/view?mode=adapt**.
 
-<iframe class="demo" src="_static/view.html?demo&mode=room&hand=right&robot" title="The ADAPT hand at your wrist, in the room" loading="lazy"></iframe>
+<iframe class="demo" src="_static/view.html?demo&mode=room&hand=right&show=adapt" title="The ADAPT hand where the robot goes, in the room" loading="lazy"></iframe>
 
-In **Room**, with **Robot** on, the amber ADAPT hand is where the robot goes: at your wrist, its
-own wrist straight. While `metaquest-teleop` runs it is what the robot gets, so it holds still
-while you pinch your left hand. The terminal shows the same ADAPT hand, in yellow, next to yours.
+In **Room**, **ADAPT hand** shows the ADAPT hand instead of yours, where the robot goes: at your
+wrist, its own wrist straight. While `metaquest-teleop` runs it is what the robot gets, so it
+holds still, faded, while you pinch your left hand. The terminal shows the same ADAPT hand, in
+yellow, next to yours, greyed while it holds its last pose.
 
 ## In Python
 

@@ -346,6 +346,26 @@ def test_the_dashboard_shows_the_adapt_hand_next_to_yours():
     assert "RIGHT" in texts[False] and "CMC1" not in texts[False] and "PID" not in texts[False]
 
 
+def test_the_dashboards_adapt_hand_says_when_it_holds_its_last_pose():
+    from rich.console import Console
+
+    from metaquest_teleop import Teleop
+    from metaquest_teleop.dashboard import render
+
+    port = _free_port()
+    with QuestHands(port, adb=False) as quest:
+        teleop = Teleop(quest)
+        asyncio.run(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=0.5))  # both hands: moving
+        asyncio.run(stream(f"ws://127.0.0.1:{port}/ws", hz=60, seconds=0.3, hands=("right",)))  # left gone
+        console = Console(width=160, record=True, file=io.StringIO())
+        console.print(render(quest, 160))
+        text = console.export_text()
+        command = teleop.command()
+    assert command.hold and command.reason == "left hand not seen" and command.joints is not None
+    assert "holding its last pose: left hand not seen" in text
+    assert "CMC1" in text and "PIP" in text  # the pose it holds, greyed
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 def test_the_3d_views_demo_makes_the_same_fake_hands_as_python(tmp_path):
     from metaquest_teleop.fake import pose_at

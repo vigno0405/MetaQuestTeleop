@@ -122,7 +122,10 @@
     <button data-toggle="follow" title="Keep the selected hand in the middle">Follow</button>
     <button data-toggle="trail" title="The wrist's path over the last two seconds">Trail</button>
     <button data-toggle="axes" title="The axes of the space and of the wrist">Axes</button>
-    <button data-toggle="robot" id="robot-toggle" title="The ADAPT hand where the robot puts it: at your wrist, its own wrist straight (0, 0); still while the robot holds">Robot</button>
+  </div>
+  <div class="seg" data-key="show" id="show-seg">
+    <button data-value="hand" title="Your hands, where they are">Your hand</button>
+    <button data-value="adapt" title="The ADAPT hand alone, where the robot goes: at your wrist, its own wrist straight (0, 0); still while the robot holds">ADAPT hand</button>
   </div>
   <div class="seg"><button id="reset" title="Back to the starting viewpoint (or double-click)">Reset view</button></div>
 </div>
@@ -137,16 +140,14 @@
       <tbody id="angles"></tbody>
     </table>
     <div class="caption">Bend at the base, middle and tip joints; spread sideways at the base.</div>
-    <div class="caption" id="robot-legend" hidden><b style="color: #f5b83d">Amber</b>: the ADAPT hand, where
-      the robot goes: at your wrist, its own wrist straight; still while the robot holds.</div>
   </div>
   <div id="adapt-panel" hidden>
     <h2>ADAPT joints, the pose it can take (°)</h2>
     <table class="angles mono" id="adapt-joints"></table>
     <h2>ADAPT motors (rad)</h2>
     <table class="angles mono" id="adapt-motors"></table>
-    <div class="caption">Each DIP mimics its PIP, and one motor spreads the fingers: both take the
-      closest pose. Amber: at the robot's limit. Hover for yours.</div>
+    <div class="caption">Each DIP mimics its PIP, and one motor spreads the fingers. Amber: at
+      the robot's limit.</div>
   </div>
 </div>
 
@@ -495,7 +496,7 @@ const state = {
   mode: ["hand", "adapt"].includes(params.get("mode")) ? params.get("mode") : "room",
   side: params.get("hand") === "left" ? "left" : "right",
   follow: true, trail: true, axes: true,
-  robot: !params.has("demo") || params.has("robot"),  // the ADAPT hand in the room
+  show: params.get("show") === "adapt" ? "adapt" : "hand",  // in Room: your hand, or the ADAPT hand
 };
 // The starting viewpoints. Room: about where your eyes are, a little above and towards the
 // middle from the selected hand, so it looks as you see it. Hand: from the thumb's side.
@@ -529,8 +530,8 @@ function connect() {
       frame = msg.frame;
       lastFrameAt = performance.now();
       everFrame = true;
-      const hand = frame[state.side];
-      if (hand) trail.push([lastFrameAt, hand.joints[0].slice(0, 3)]);
+      const point = trailPoint();
+      if (point) trail.push([lastFrameAt, point]);
     }
   };
   ws.onclose = () => { linkUp = false; setTimeout(connect, 1000); };
@@ -658,7 +659,7 @@ function addHead(cam, head) {
 // The forearm, as a translucent sleeve from the wrist towards the elbow (the wrist's +z), so the
 // skeleton reads as a hand on an arm; its palm side (the wrist's -y) is blue. `toSpace` takes a
 // point in the wrist's frame to the drawing's space.
-function addSleeve(cam, toSpace, alpha, robot = false) {
+function addSleeve(cam, toSpace, alpha) {
   const N = 20;
   const rings = [[0.0, 0.03, 0.019], [0.05, 0.033, 0.022], [0.11, 0.036, 0.026]];  // z, x and y radii, m
   const pts = rings.map(([z, rx, ry]) => Array.from({ length: N }, (_, i) => {
@@ -671,13 +672,10 @@ function addSleeve(cam, toSpace, alpha, robot = false) {
       const j = (i + 1) % N;
       const palmSide = Math.sin((2 * Math.PI * (i + 0.5)) / N) < 0;
       addPoly(cam, [pts[r][i], pts[r][j], pts[r + 1][j], pts[r + 1][i]],
-              robot ? `rgba(245, 184, 61, ${(palmSide ? 0.22 : 0.1) * fade})`
-                    : palmSide ? `rgba(138, 180, 248, ${0.24 * fade})` : `rgba(230, 237, 243, ${0.16 * fade})`, alpha);
+              palmSide ? `rgba(138, 180, 248, ${0.24 * fade})` : `rgba(230, 237, 243, ${0.16 * fade})`, alpha);
     }
   }
-  for (let i = 0; i < N; i++) {
-    addLine(cam, pts[0][i], pts[0][(i + 1) % N], robot ? "rgba(245, 184, 61, 0.6)" : "rgba(230, 237, 243, 0.55)", 0.0012, alpha);
-  }
+  for (let i = 0; i < N; i++) addLine(cam, pts[0][i], pts[0][(i + 1) % N], "rgba(230, 237, 243, 0.55)", 0.0012, alpha);
 }
 
 // A point in a hand's wrist frame, in the room's space.
@@ -718,12 +716,15 @@ function draw() {
   trail = trail.filter(([t]) => now - t < TRAIL_S * 1000);
 
   if (state.mode === "room") {
-    if (state.follow && hand && alive) view.target = lerp(view.target, palm(hand), 0.12);
+    const robot = state.show === "adapt" ? robotNow() : null;  // the ADAPT hand, instead of yours
+    const focus = state.show === "adapt" ? robot && robotPalm(robot) : hand && palm(hand);
+    if (state.follow && focus && alive) view.target = lerp(view.target, focus, 0.12);
     const cam = camera(view, width, height);
     addGrid(cam);
     if (state.axes) addAxes(cam, [0, 0, 0], [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 0.25, ["x", "y", "z"]);
     if (frame && frame.head) addHead(cam, frame.head);
-    for (const side of ["left", "right"]) {
+    if (robot) addRobot(cam, robot, (alive ? 1 : 0.3) * (robot.hold ? 0.55 : 1));
+    for (const side of state.show === "adapt" ? [] : ["left", "right"]) {
       const h = frame && frame[side];
       if (!h) continue;
       const selected = side === state.side;
@@ -736,8 +737,6 @@ function draw() {
         if (state.axes) addAxes(cam, pts[0], quatToMat(h.joints[0].slice(3, 7)), 0.06, null, alpha);
       }
     }
-    const robot = state.robot ? robotNow() : null;
-    if (robot) addRobot(cam, robot, alive ? 1 : 0.3);
     if (state.trail && alive) {
       for (let i = 1; i < trail.length; i++) {
         const age = (now - trail[i][0]) / (TRAIL_S * 1000);
@@ -771,27 +770,35 @@ function robotNow() {
   return { wrist: adaptWrist(hand.joints[0]), joints: adaptJoints(handAngles(hand), hand.joints), hold: false };
 }
 
-const ROBOT_COLOR = "#f5b83d";  // amber, as the ADAPT panel in the terminal
+const robotPalm = (robot) => add(robot.wrist.slice(0, 3), matVec(quatToMat(robot.wrist.slice(3, 7)), [0, 0, 0.05]));
 
+// Where the trail goes: the ADAPT hand's wrist when it is shown in Room, else your wrist.
+function trailPoint() {
+  if (state.mode === "room" && state.show === "adapt") {
+    const robot = robotNow();
+    return robot ? robot.wrist.slice(0, 3) : null;
+  }
+  const hand = frame && frame[state.side];
+  return hand ? hand.joints[0].slice(0, 3) : null;
+}
+
+// The ADAPT hand where the robot goes, drawn as your hand is: its forearm straight on (its wrist
+// stays at 0, 0), its fingers where its motors put them.
 function addRobot(cam, robot, alpha) {
-  // Where its motors would put it: the joints through the coupling, as in the ADAPT view.
   const motors = adaptMotors(robot.joints);
   const pts = adaptInRoom(robot.wrist, ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0)));
   const r = quatToMat(robot.wrist.slice(3, 7)), o = robot.wrist.slice(0, 3);
-  // Its forearm, straight on: the wrist stays at 0, 0. The sleeve's frame (your wrist's axes) is
-  // the ADAPT base frame turned half a turn about x.
-  addSleeve(cam, (l) => add(o, matVec(r, add(ADAPT_PALM, [l[0], -l[1], -l[2]]))), alpha, true);
-  // A translucent body under your skeleton: wide bones, small joints.
-  const ghost = 0.6 * alpha;
-  addPoly(cam, [pts.wrist].concat(ADAPT_DIGITS.map((d) => pts[d][0])), "rgba(245, 184, 61, 0.16)", alpha);
-  ADAPT_DIGITS.forEach((d) => {
+  // The sleeve's frame (your wrist's axes) is the ADAPT base frame turned half a turn about x.
+  addSleeve(cam, (l) => add(o, matVec(r, add(ADAPT_PALM, [l[0], -l[1], -l[2]]))), alpha);
+  addPoly(cam, [pts.wrist].concat(ADAPT_DIGITS.map((d) => pts[d][0])), "rgba(230, 237, 243, 0.14)", alpha);
+  ADAPT_DIGITS.forEach((d, f) => {
     const q = pts[d];
-    for (let k = 1; k < q.length; k++) addLine(cam, q[k - 1], q[k], ROBOT_COLOR, 0.009, ghost);
-    q.forEach((p, k) => addDot(cam, p, k === q.length - 1 ? 0.0055 : 0.004, ROBOT_COLOR, ghost));
+    for (let k = 1; k < q.length; k++) addLine(cam, q[k - 1], q[k], COLORS[f], 0.006, alpha);
+    q.forEach((p, k) => addDot(cam, p, k === q.length - 1 ? 0.0075 : 0.0055, COLORS[f], alpha));
   });
-  addDot(cam, pts.wrist, 0.008, ROBOT_COLOR, ghost);
-  addLabel(cam, add(o, matVec(r, [0, -0.03, 0.21])), robot.hold ? "ADAPT · holding" : "ADAPT", ROBOT_COLOR, alpha);
-  if (state.axes) addAxes(cam, o, r, 0.05, null, alpha);
+  addDot(cam, pts.wrist, 0.011, WRIST_COLOR, alpha);
+  addLabel(cam, add(o, matVec(r, [0, -0.03, 0.21])), robot.hold ? "ADAPT · holding its last pose" : "ADAPT", WRIST_COLOR, alpha);
+  if (state.axes) addAxes(cam, o, r, 0.06, null, alpha);
 }
 
 // Your hand on the left; on the right the ADAPT hand, where its motors would put it.
@@ -878,10 +885,9 @@ const signed = (v) => (v >= 0 ? "+" : "") + v.toFixed(3);
 const adaptJointCells = adaptTable("adapt-joints", ADAPT_JOINT_ROWS);
 const adaptMotorCells = adaptTable("adapt-motors", ADAPT_MOTOR_ROWS);
 
-function updateAdaptPanel(hand) {
-  // The pose the robot takes (each DIP its PIP, one spread for all), and yours, joint by joint.
-  const joints = hand ? adaptJoints(handAngles(hand), hand.joints) : null;
-  const wanted = hand ? adaptJoints(handAngles(hand), hand.joints, false, ADAPT_THUMB_REST, false) : null;
+// The ADAPT tables for `joints` (a pose it can take: each DIP its PIP, one spread for all), with
+// `wanted`, your angles joint by joint, in the tooltips when known.
+function updateAdaptPanel(joints, wanted = null) {
   const motors = joints ? adaptMotors(joints) : null;
   adaptJointCells.forEach(([cell, i]) => {
     if (!joints) { cell.textContent = ""; return; }
@@ -889,7 +895,7 @@ function updateAdaptPanel(hand) {
     const atLimit = [lo, hi].some((edge) => edge !== 0 && Math.abs(joints[i] - edge) < 1e-6);
     cell.textContent = deg(joints[i], spread);
     cell.className = atLimit ? "out" : "";
-    cell.title = `yours: ${deg(wanted[i], spread)}; the robot's range: ${deg(lo)} to ${deg(hi)}`;
+    cell.title = (wanted ? `yours: ${deg(wanted[i], spread)}; ` : "") + `the robot's range: ${deg(lo)} to ${deg(hi)}`;
   });
   const all = motors ? motors.concat([0, 0]) : null;  // and the wrist's two, which stay at 0, 0
   adaptMotorCells.forEach(([cell, m]) => {
@@ -925,23 +931,35 @@ function updatePanels() {
                         teleop === "moving" ? "moving" : `holding: ${teleop}`);
   }
 
-  $("robot-toggle").hidden = !(DEMO || (robotCommand && robotCommand.adapt));
+  $("show-seg").hidden = state.mode !== "room" || !(DEMO || (robotCommand && robotCommand.adapt));
+  if (robotCommand && !robotCommand.adapt && state.show === "adapt") {  // --no-adapt: no ADAPT hand to show
+    state.show = "hand";
+    syncControls();
+  }
+  const showRobot = state.mode === "room" && state.show === "adapt";
   const only = !DEMO && status && status.hands !== "both" ? status.hands : null;  // the one hand streamed
-  $("side-seg").hidden = Boolean(only);
+  $("side-seg").hidden = Boolean(only) || showRobot;
   if (only && state.side !== only) {
     state.side = only;
     trail = [];
     syncControls();
   }
-  $("robot-legend").hidden = !(state.mode === "room" && state.robot && robotNow());
   const hand = frame && frame[state.side];
   const side = state.side.toUpperCase();
-  $("human-panel").hidden = $("hand-wrist").hidden = $("hand-pinch").hidden = state.mode === "adapt";
-  $("adapt-panel").hidden = state.mode !== "adapt";
-  if (state.mode === "adapt") updateAdaptPanel(hand);
-  $("hand-title").innerHTML = hand
-    ? `${side} <span style="color: var(--ok)">● tracked</span>`
-    : `${side} <span>○ not tracked</span>`;
+  const adaptShown = state.mode === "adapt" || showRobot;
+  $("human-panel").hidden = $("hand-wrist").hidden = $("hand-pinch").hidden = adaptShown;
+  $("adapt-panel").hidden = !adaptShown;
+  if (state.mode === "adapt") {
+    updateAdaptPanel(hand ? adaptJoints(handAngles(hand), hand.joints) : null,
+                     hand ? adaptJoints(handAngles(hand), hand.joints, false, ADAPT_THUMB_REST, false) : null);
+  }
+  const robot = showRobot ? robotNow() : null;
+  if (showRobot) updateAdaptPanel(robot ? robot.joints : null);
+  $("hand-title").innerHTML = showRobot
+    ? (robot ? (robot.hold ? `ADAPT <span style="color: var(--warn)">○ holding its last pose</span>`
+                           : `ADAPT <span style="color: var(--ok)">● moving</span>`)
+             : "ADAPT <span>○ waiting for both hands</span>")
+    : hand ? `${side} <span style="color: var(--ok)">● tracked</span>` : `${side} <span>○ not tracked</span>`;
   if (hand) {
     const w = hand.wrist.position;
     $("hand-wrist").textContent = `wrist  x ${signed(w[0])}  y ${signed(w[1])}  z ${signed(w[2])} m`;
@@ -1005,7 +1023,8 @@ function demoStep(now) {
             left: demoHand("left", demo.poses.left), right: demoHand("right", demo.poses.right) };
   lastFrameAt = now;
   everFrame = true;
-  trail.push([now, frame[state.side].joints[0].slice(0, 3)]);
+  const point = trailPoint();
+  if (point) trail.push([now, point]);
 }
 
 function setAnimate(on) {
@@ -1052,7 +1071,7 @@ function syncControls() {
     b.classList.toggle("on", state[b.dataset.toggle]);
     b.disabled = state.mode !== "room" && b.dataset.toggle !== "axes";
   });
-  history.replaceState(null, "", `?${DEMO ? "demo&" : ""}mode=${state.mode}&hand=${state.side}${DEMO && state.robot ? "&robot" : ""}`);
+  history.replaceState(null, "", `?${DEMO ? "demo&" : ""}mode=${state.mode}&hand=${state.side}${state.show === "adapt" ? "&show=adapt" : ""}`);
 }
 
 function resetView() {
@@ -1071,7 +1090,7 @@ document.querySelectorAll(".seg[data-key] button").forEach((b) => b.addEventList
   if (state[key] === b.dataset.value) return;
   state[key] = b.dataset.value;
   trail = [];
-  view = Object.assign(home(state.mode, state.side), state.mode === "room" ? { target: view.target } : {});
+  if (key !== "show") view = Object.assign(home(state.mode, state.side), state.mode === "room" ? { target: view.target } : {});
   syncControls();
 }));
 document.querySelectorAll("button[data-toggle]").forEach((b) => b.addEventListener("click", () => {

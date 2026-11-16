@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.2 (2026-11-16)
+
+- 3D view, Room: **Your hand** (the default) or **ADAPT hand**, one at a time: the ADAPT hand
+  alone, where the robot goes, drawn as your hand is, with its joints and motors in the panel.
+  It replaces the amber ADAPT hand drawn over yours.
+- Dashboard: while the robot holds, the ADAPT panel says it holds its last pose, greyed, so it
+  does not look tracked when your hand is not.
+
 ## 0.6.1 (2026-11-16)
 
 - The ADAPT joint angles are a pose the ADAPT hand can take, as in its kinematics
