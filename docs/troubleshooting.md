@@ -8,10 +8,18 @@
 | `waiting for the page` | open http://localhost:8012 in the Quest's browser |
 | `page open: press Start` | press Start on the page in the headset |
 | *WebXR is not available*, in the headset | open exactly `http://localhost:8012`, not the computer's address |
+| *This site can't provide a secure connection*, in the headset | type the address with `http://`: **http://localhost:8012** |
+| all black in the headset after Start | update: `pip install --upgrade metaquest-teleop` (fixed in 0.5.0) |
 | *Hand tracking is unavailable*, in the headset | turn hand tracking on and put the controllers down |
 | `Could not serve on port 8012` | another copy is running: stop it, or use `--port 8013` |
+
+**No *Allow USB debugging* question in the headset.** Turn developer mode on, use a data cable,
+and check that `lsusb | grep 2833` shows the headset. The question waits in the headset's
+notifications; `adb kill-server` then `adb devices` asks again.
 
 **Linux: `adb devices` says `no permissions`.** Run
 `sudo apt install android-sdk-platform-tools-common`, then unplug and replug the headset.
 
-**Errors with ROS 2 sourced.** Run `env -u PYTHONPATH metaquest-teleop`.
+**`ROS 2 not found: not publishing`.** Source ROS and run with the Python your ROS uses (3.10
+for Humble, 3.12 for Jazzy), as in [ROS 2](ros.md). A conda environment with another Python
+cannot load ROS; `--no-ros` hides the message.

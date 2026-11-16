@@ -27,7 +27,7 @@ developer mode and hand tracking on.
 ## Run
 
 1. Plug in the headset and run `metaquest-teleop`.
-2. In the Quest's browser, open **http://localhost:8012** and press **Start**.
+2. In the Quest's browser, open **http://localhost:8012** (type the `http://`) and press **Start**.
 3. Watch your hands in the terminal, or in 3D at **http://localhost:8012/view**
    ([try the 3D view in your browser](https://vigno0405.github.io/MetaQuestTeleop/view.html#try-it-here)).
 

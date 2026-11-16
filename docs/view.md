@@ -41,6 +41,8 @@ Some things to try:
 - The dashed line is the pinch: thumb tip to index tip, in millimetres.
 - The table gives each finger's angles: the bend at its base, middle and tip joints, and its
   spread sideways. See [the data](data.md#angles).
+- While `metaquest-teleop` runs, the **robot** line says whether a robot would move or hold
+  ([teleoperation](teleop.md)).
 
 ## Controls
 

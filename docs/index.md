@@ -13,7 +13,7 @@ get both wrists, 25 joints and 20 joint angles per hand. Nothing to install on t
 
 1. `pip install metaquest-teleop`
 2. Plug in the headset and run `metaquest-teleop`.
-3. In the Quest's browser, open **http://localhost:8012** and press **Start**.
+3. In the Quest's browser, open **http://localhost:8012** (with the `http://`) and press **Start**.
 
 No headset? Run `metaquest-teleop-fake` in a second terminal. [Get started](start.md) has the
 details, including the one-time setup of the headset.
@@ -37,7 +37,13 @@ with QuestHands() as quest:
             print(frame.right.wrist.position, frame.right.pinch)
 ```
 
-More in [Use it in Python](python.md). Driving the ADAPT hand? See [ADAPT Hand](adapt.md).
+More in [Use it in Python](python.md).
+
+## Drive a robot
+
+Your right hand drives the robot; pinch your left hand to pause it, and it holds when a hand is
+not seen ([Teleoperation](teleop.md)). `metaquest-teleop` publishes it all on [ROS 2](ros.md),
+Humble or Jazzy, whenever it finds ROS. Driving the ADAPT hand? See [ADAPT Hand](adapt.md).
 
 Written by Gregorio Valenti and Lorenzo Vignoli. MIT license. Source on
 [GitHub](https://github.com/vigno0405/MetaQuestTeleop).

@@ -23,7 +23,7 @@ napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 
 html_theme = "sphinx_immaterial"
-html_title = "metaquest-teleop"
+html_title = f"metaquest-teleop {release}"  # the version these pages are built from
 html_favicon = "_static/favicon.svg"
 # Tooltips of API objects without their synopsis, which the theme joins with an em dash.
 # The page outline lists classes, functions and attributes, not their parameters and fields.

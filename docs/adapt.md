@@ -34,6 +34,12 @@ with QuestHands() as quest:
 The 13 motors leave the ADAPT wrist out: it stays at (0, 0). Use `joints` for a controller in
 joint space, such as VMC, and `motors` as targets for a PID on the motors.
 
+## With the gestures and ROS 2
+
+`metaquest-teleop` publishes the ADAPT hand's joints and motors on `/metaquest/adapt/joint_states`
+and `/metaquest/adapt/motors` ([ROS 2](ros.md)). They hold still while you pinch your left hand,
+or while a hand is not seen ([teleoperation](teleop.md)). `--no-adapt` leaves them out.
+
 ## Joints: from your hand
 
 | ADAPT joint | From your hand |

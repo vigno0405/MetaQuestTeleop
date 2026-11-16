@@ -36,9 +36,13 @@ You also need `adb`, which carries the data over the USB cable:
 metaquest-teleop
 ```
 
-In the headset, open the **Browser**, go to **http://localhost:8012** and press **Start**. Put
-the controllers down: the terminal shows your hands live. The Meta button pauses, `Ctrl-C`
-stops.
+In the headset, open the **Browser**, go to **http://localhost:8012** (type the `http://`) and
+press **Start**: you see your room. Put the controllers down: the terminal shows your hands live,
+and its **robot** line whether a robot would move ([teleoperation](teleop.md)). The Meta button
+pauses, `Ctrl-C` stops.
+
+When it finds ROS 2 it also publishes on [ROS 2](ros.md) topics; otherwise it says it is not
+publishing, and works the same.
 
 To see the hands in 3D, open **http://localhost:8012/view** on your computer, or start with
 `metaquest-teleop --view`.
