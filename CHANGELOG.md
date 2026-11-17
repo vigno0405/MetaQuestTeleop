@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.1 (2026-11-17)
+
+- The library's calibration: the thumb's CMC2 and IP take the points of a calibration made with
+  `metaquest-teleop --calibration` (two more CMC2 points, one more IP point). With least squares,
+  the ADAPT thumb's IP now turns about one and a half times as far as yours (it was twice), and
+  its CMC2 follows the plane closest to the five points.
+
 ## 0.13.0 (2026-11-17)
 
 - Each ADAPT joint takes the line closest to its calibration points, by least squares (the

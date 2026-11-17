@@ -193,7 +193,8 @@ their best fit with more. Always within the joint's range.
 The library's first points were typical ranges, set so that, as with the real hand's poses of
 HumanManipulationVMC (Santello et al., 1998): your **open hand gives home**, all zeros; a
 **power grasp gives PC1** (thumb CMC1 65°, MCP 50°; fingers 55° and 65°); a **pinch gives PC2**
-(thumb 50°, MCP 35°; index 25° and 40°); and the thumb's IP turns twice as far as yours. The 3D
+(thumb 50°, MCP 35°; index 25° and 40°); and the thumb's IP turned twice as far as yours. The
+thumb's CMC2 and IP have since been calibrated with `metaquest-teleop --calibration`. The 3D
 view of `metaquest-teleop` uses the same calibration, and fits or not as the library does.
 
 The ADAPT thumb's CMC joints are a gimbal: CMC2 swings its first bone from sideways towards the

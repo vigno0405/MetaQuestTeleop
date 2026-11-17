@@ -959,6 +959,7 @@ def test_while_calibrating_only_the_thumb_joint_you_drag_moves(tmp_path):
     html = VIEW.read_text(encoding="utf-8")
     script = tmp_path / "drag.js"
     script.write_text(html.split("// math-begin")[1].split("// math-end")[0] + f"""
+adaptCalibration = {json.dumps({j: adapt._rows(points) for j, points in adapt.CALIBRATION.items()})};
 const [a, j] = {json.dumps([hand.angles.tolist(), np.hstack([hand.positions, hand.quaternions]).tolist()])};
 const out = [adaptJoints(a, j)];
 for (let k = 0; k < 4; k++) out.push(adaptJoints(a, j, true, true, adaptFit, [k, 0.2]));

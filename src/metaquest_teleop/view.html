@@ -395,8 +395,8 @@ let adaptFollows = Object.fromEntries(ADAPT_NAMES.map((j) => {  // metaquest-tel
   return [j, [`${digit} ${{ spread: "spread", MCP: "base", PIP: "middle", DIP: "tip" }[joint]}`]];
 }));
 const ADAPT_CALIBRATION = {
-  thumb_CMC1: [[5, 0], [95, 86]], thumb_CMC2: [[0, 30, 20], [20, 35, 0], [70, 20, -60]],
-  thumb_MCP: [[0, 0], [65, 86]], thumb_IP: [[0, 0], [45, 90]],
+  thumb_CMC1: [[5, 0], [95, 86]], thumb_CMC2: [[0, 30, 20], [20, 35, 0], [43, 21.6, -6], [44.3, 15, -1], [70, 20, -60]],
+  thumb_MCP: [[0, 0], [65, 86]], thumb_IP: [[0, 0], [44.9, 42], [45, 90]],
   index_spread: [[0, 0], [20, -17]], index_MCP: [[0, 0], [90, 86]], index_PIP: [[0, 0], [90, 69]], index_DIP: [[0, 0], [60, 69]],
   middle_MCP: [[0, 0], [90, 86]], middle_PIP: [[0, 0], [90, 69]], middle_DIP: [[0, 0], [60, 69]],
   ring_spread: [[-15, 17], [0, 0]], ring_MCP: [[0, 0], [90, 86]], ring_PIP: [[0, 0], [90, 69]], ring_DIP: [[0, 0], [60, 69]],
