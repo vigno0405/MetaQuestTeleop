@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.0 (2026-11-17)
+
+- Each ADAPT joint takes the line closest to its calibration points, by least squares (the
+  plane, for the thumb's CMC2): through them with two points (three for CMC2), their best fit
+  with more. It no longer passes through every point, so two points close together average out
+  instead of making the joint jump between them. The library's points give the same hand as
+  before.
+
 ## 0.12.1 (2026-11-17)
 
 - Calibrating: while you drag a thumb joint, only that joint moves; the fit no longer moves the

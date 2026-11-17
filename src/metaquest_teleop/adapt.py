@@ -88,11 +88,10 @@ FOLLOWS = {
 
 #: The calibration: for each ADAPT joint, points of yours and the angle it takes there, in
 #: degrees: ``{your angle: its angle}``; for the thumb's CMC2, ``{(your base, your spread): its
-#: angle}`` (:data:`FOLLOWS`). Each joint goes through every point of its own: for one angle of
-#: yours, straight from one point to the next, and on in a straight line beyond the first and the
-#: last; for two, the smoothest surface through them (a thin-plate spline: with three points, the
-#: plane through them). Then within its limits (:data:`JOINT_LIMITS`). At least two points (for
-#: two angles, three not on one line).
+#: angle}`` (:data:`FOLLOWS`). Each joint follows the line closest to its points (for two angles
+#: of yours, the plane), by least squares: through them with two points (three for a plane), their
+#: best fit with more. Then within its limits (:data:`JOINT_LIMITS`). At least two points, at
+#: different angles of yours (for two angles, three not on one line).
 #:
 #: These are the library's points. Change them at any time, in Python or in the 3D view
 #: (``metaquest-teleop --calibration``, which saves each calibration to a file in
@@ -115,15 +114,10 @@ _DEFAULT_CALIBRATION = {joint: dict(points) for joint, points in CALIBRATION.ite
 #: ``~/.config`` when set).
 CALIBRATIONS = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "metaquest-teleop" / "calibrations"
 
-def _spline(r: np.ndarray) -> np.ndarray:
-    """The thin-plate spline's kernel, r^2 log r (0 at r = 0)."""
-    return np.where(r > 0.0, r * r * np.log(np.where(r > 0.0, r, 1.0)), 0.0)
-
-
-def _model(joint: str, points: dict) -> tuple:
-    """How a joint follows yours through its points: for one angle of yours, the points sorted
-    (yours, its); for more, the thin-plate spline (yours (n, k), weights (n,), plane (k + 1,)).
-    ValueError if the points cannot make one."""
+def _model(joint: str, points: dict) -> np.ndarray:
+    """The line closest to a joint's points (for two angles of yours, the plane), by least squares:
+    its angle at yours all 0, then how much it turns per degree of each, (k + 1,). ValueError if
+    the points cannot make one."""
     k = len(FOLLOWS[joint])
     names = ", ".join(FOLLOWS[joint])
     if k == 0:
@@ -135,33 +129,21 @@ def _model(joint: str, points: dict) -> tuple:
             raise ValueError(f"{joint}: a point is {k} angle(s) of yours ({names}) and its angle, in degrees, not {key!r}: {value!r}")
         yours.append(x)
         its.append(float(value))
-    yours, its = np.array(yours, dtype=float).reshape(-1, k), np.array(its)
-    if k == 1:
-        order = np.argsort(yours[:, 0], kind="stable")
-        x, y = yours[order, 0], its[order]
-        if len(x) < 2 or np.any(np.diff(x) == 0):
-            raise ValueError(f"{joint} needs two points or more, at different angles of yours ({names})")
-        return x, y
-    n = len(yours)
-    plane = np.c_[np.ones(n), yours]
-    if n < k + 1 or np.linalg.matrix_rank(plane) < k + 1:
-        raise ValueError(f"{joint} needs {k + 1} points or more, not all on one line ({names})")
-    system = np.block([[_spline(np.linalg.norm(yours[:, None] - yours[None], axis=-1)), plane],
-                       [plane.T, np.zeros((k + 1, k + 1))]])
-    try:
-        solved = np.linalg.solve(system, np.r_[its, np.zeros(k + 1)])
-    except np.linalg.LinAlgError:
-        raise ValueError(f"{joint}: two of its points are at the same angles of yours ({names})") from None
-    return yours, solved[:n], solved[n:]
+    a = np.c_[np.ones(len(yours)), np.array(yours, dtype=float).reshape(-1, k)]
+    if np.linalg.matrix_rank(a) < k + 1:
+        raise ValueError(f"{joint} needs two points or more, at different angles of yours ({names})" if k == 1
+                         else f"{joint} needs {k + 1} points or more, not all on one line ({names})")
+    return np.linalg.lstsq(a, np.array(its), rcond=None)[0]
 
 
-_MODELS: dict = {}  # joint -> (its points, as items, when solved; its model)
+_MODELS: dict = {}  # joint -> (its points, as items, when fitted; its line)
 
 
 def calibrated(joint: str, *yours: float) -> float:
     """The angle of the ADAPT joint, in degrees, for these angles of yours, in degrees (its
-    :data:`FOLLOWS`, in that order), through its :data:`CALIBRATION` points; before its limits.
-    ``calibrated("thumb_CMC2", 20, 35)`` is the CMC2 for your thumb's base at 20° and spread at 35°."""
+    :data:`FOLLOWS`, in that order): the line closest to its :data:`CALIBRATION` points (the plane,
+    for two angles of yours); before its limits. ``calibrated("thumb_CMC2", 20, 35)`` is the CMC2
+    for your thumb's base at 20° and spread at 35°."""
     if len(yours) != len(FOLLOWS[joint]):
         raise TypeError(f"{joint} follows {len(FOLLOWS[joint])} angle(s) of yours ({', '.join(FOLLOWS[joint])}), not {len(yours)}")
     if not yours:
@@ -171,15 +153,8 @@ def calibrated(joint: str, *yours: float) -> float:
     cached = _MODELS.get(joint)
     if cached is None or cached[0] != items:
         cached = _MODELS[joint] = (items, _model(joint, points))
-    model = cached[1]
-    if len(model) == 2:  # one angle of yours: straight from point to point, and on beyond the ends
-        x, y = model
-        v = float(yours[0])
-        i = int(min(max(np.searchsorted(x, v, side="right") - 1, 0), len(x) - 2))
-        return float(y[i] + (v - x[i]) * (y[i + 1] - y[i]) / (x[i + 1] - x[i]))
-    points_at, weights, plane = model
-    v = np.asarray(yours, dtype=float)
-    return float(plane[0] + plane[1:] @ v + weights @ _spline(np.linalg.norm(points_at - v, axis=1)))
+    line = cached[1]
+    return float(line[0] + line[1:] @ np.asarray(yours, dtype=float))
 
 
 def _points(joint: str, rows) -> dict:

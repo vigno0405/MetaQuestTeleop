@@ -445,24 +445,30 @@ def test_your_calibration_can_be_changed_at_any_time():
     assert adapt.joint_angles(hand, fit=False)[5] == pytest.approx(min(2 * before, adapt.JOINT_LIMITS["index_MCP"][1]))
 
 
-def test_each_joint_goes_through_every_point_of_yours():
+def test_each_joint_takes_the_line_closest_to_your_points():
     from metaquest_teleop import adapt
 
-    # One angle of yours: straight from point to point, and on beyond the first and the last.
-    adapt.CALIBRATION["thumb_IP"] = {0: 0, 20: 30, 45: 90}
-    for yours, its in ((0, 0), (20, 30), (45, 90), (10, 15), (30, 54), (60, 126), (-10, -15)):
-        assert adapt.calibrated("thumb_IP", yours) == pytest.approx(its, abs=1e-12)
+    # Two points: the line through them, on beyond them, then within the joint's limits.
+    adapt.CALIBRATION["thumb_IP"] = {0: 0, 45: 90}
+    for yours, its in ((0, 0), (45, 90), (10, 20), (60, 120), (-10, -20)):
+        assert adapt.calibrated("thumb_IP", yours) == pytest.approx(its, abs=1e-9)
     hand = synthetic_hand("right", np.array([[0.4, 0.5, 0.3, np.radians(60)]] + [[0.4, 0.0, 0.5, 0.3]] * 4), _pose(np.random.default_rng(3)))
-    for fit in (True, False):  # then within its limits: 126° is its 90°
+    for fit in (True, False):  # 120° is its 90°
         assert np.degrees(adapt.joint_angles(hand, fit=fit)[3]) == pytest.approx(90)
-        assert np.degrees(adapt.joint_angles(hand, fit=fit, clip=False)[3]) == pytest.approx(126)
+        assert np.degrees(adapt.joint_angles(hand, fit=fit, clip=False)[3]) == pytest.approx(120)
+    # More: the least-squares line, so that points close together average out, never jump.
+    adapt.CALIBRATION["thumb_IP"] = {0: 0, 44.9: 42, 45: 90}
+    slope, at_zero = np.polyfit([0, 44.9, 45], [0, 42, 90], 1)
+    for yours in (0, 20, 44.9, 45, 60):
+        assert adapt.calibrated("thumb_IP", yours) == pytest.approx(at_zero + slope * yours, abs=1e-9)
+    assert adapt.calibrated("thumb_IP", 45) - adapt.calibrated("thumb_IP", 44.9) < 1
     assert adapt.calibrated("middle_spread") == 0  # it follows none of yours
     # Not enough points, or not the angles it follows: a clear error.
     for points in ({0: 0}, {(0, 1): 0, (1, 2): 3}):
         adapt.CALIBRATION["thumb_IP"] = points
         with pytest.raises(ValueError, match="thumb_IP"):
             adapt.calibrated("thumb_IP", 10)
-    adapt.CALIBRATION["thumb_CMC2"] = {(0, 0): 0, (10, 10): 5, (20, 20): 10}  # on one line: no surface
+    adapt.CALIBRATION["thumb_CMC2"] = {(0, 0): 0, (10, 10): 5, (20, 20): 10}  # on one line: no plane
     with pytest.raises(ValueError, match="not all on one line"):
         adapt.calibrated("thumb_CMC2", 5, 5)
     with pytest.raises(TypeError):
@@ -664,7 +670,7 @@ def test_joint_for_joint_the_adapt_hand_does_what_yours_does():
 def test_the_thumbs_cmc2_follows_your_base_and_spread_through_your_poses():
     from metaquest_teleop import adapt
 
-    # Through every pose of yours exactly: (base, spread) -> CMC2, degrees.
+    # Three poses of yours: through each exactly, (base, spread) -> CMC2, degrees.
     for (base, spread), cmc2 in adapt.CALIBRATION["thumb_CMC2"].items():
         assert adapt.calibrated("thumb_CMC2", base, spread) == pytest.approx(cmc2, abs=1e-9)
     # Both ways, the ADAPT's CMC2 is that surface at your thumb's base and spread, within its range.
@@ -679,11 +685,12 @@ def test_the_thumbs_cmc2_follows_your_base_and_spread_through_your_poses():
     # Three poses: the plane through them.
     for base, spread in ((10, 10), (50, 40), (80, 0)):
         assert adapt.calibrated("thumb_CMC2", base, spread) == pytest.approx((100 - 12 * base + 4 * spread) / 11, abs=1e-9)
-    # A fourth: through it too, and smooth between them: no jump anywhere on a fine grid.
+    # A fourth: the plane closest to the four, by least squares.
     adapt.CALIBRATION["thumb_CMC2"][(45, 25)] = -20
-    assert adapt.calibrated("thumb_CMC2", 45, 25) == pytest.approx(-20, abs=1e-9)
-    grid = np.array([[adapt.calibrated("thumb_CMC2", b, s) for s in np.arange(-10, 61, 0.5)] for b in np.arange(-10, 91, 0.5)])
-    assert np.abs(np.diff(grid, axis=0)).max() < 2 and np.abs(np.diff(grid, axis=1)).max() < 2
+    points = adapt.CALIBRATION["thumb_CMC2"]
+    plane = np.linalg.lstsq(np.c_[np.ones(4), list(points)], list(points.values()), rcond=None)[0]
+    for base, spread in ((45, 25), (10, 40), (80, 0)):
+        assert adapt.calibrated("thumb_CMC2", base, spread) == pytest.approx(plane @ [1, base, spread], abs=1e-9)
     # -60° is within reach: CMC2 goes from -70° to 30°, as in virtualmodelcontrol.
     assert np.degrees([low, high]) == pytest.approx([-70, 30])
     adapt.CALIBRATION["thumb_CMC2"] = {(0, 0): 10, (90, 0): 10, (0, 90): 10}  # always 10°

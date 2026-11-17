@@ -481,35 +481,21 @@ function adaptWanted(angles, joints) {
   return ADAPT_NAMES.map((j) => adaptCalibrated(j, adaptFollows[j].map((name) => yours[name])) * Math.PI / 180);
 }
 
-// The ADAPT joint's angle (degrees) for these angles of yours (degrees), as adapt.calibrated: for
-// one angle of yours, straight from point to point and on beyond the ends; for more, the
-// thin-plate spline through the points (with three, the plane through them).
-const adaptSpline = (r) => (r > 0 ? r * r * Math.log(r) : 0);
-const adaptModels = {};  // joint -> [the points it was solved for, how it follows them]
-function adaptModel(points, k) {
-  if (k === 1) {
-    const sorted = points.slice().sort((p, q) => p[0] - q[0]);
-    return { x: sorted.map((p) => p[0]), y: sorted.map((p) => p[1]) };
-  }
-  const n = points.length, gap = (p, q) => Math.hypot(...p.slice(0, k).map((v, c) => v - q[c])), A = [];
-  for (let i = 0; i < n; i++) A.push(points.map((q) => adaptSpline(gap(points[i], q))).concat([1], points[i].slice(0, k)));
-  for (let c = 0; c <= k; c++) A.push(points.map((q) => (c === 0 ? 1 : q[c - 1])).concat(new Array(k + 1).fill(0)));
-  const x = solveLinear(A, points.map((q) => q[k]).concat(new Array(k + 1).fill(0)));
-  return { points, w: x.slice(0, n), plane: x.slice(n) };
+// The ADAPT joint's angle (degrees) for these angles of yours (degrees), as adapt.calibrated: the
+// line closest to its points (for two angles of yours, the plane), by least squares.
+const adaptModels = {};  // joint -> [the points it was fitted to, its line]
+function adaptModel(points, k) {  // [its angle at yours all 0, then per degree of each]
+  const rows = points.map((p) => [1].concat(p.slice(0, k)));
+  const ata = rows[0].map((_, r) => rows[0].map((__, c) => rows.reduce((s, row) => s + row[r] * row[c], 0)));
+  const aty = rows[0].map((_, r) => rows.reduce((s, row, i) => s + row[r] * points[i][k], 0));
+  return solveLinear(ata, aty);
 }
 function adaptCalibrated(joint, yours) {
   const k = adaptFollows[joint].length, points = adaptCalibration[joint];
   if (k === 0) return 0;
   if (!adaptModels[joint] || adaptModels[joint][0] !== points) adaptModels[joint] = [points, adaptModel(points, k)];
-  const m = adaptModels[joint][1];
-  if (k === 1) {
-    const { x, y } = m, v = yours[0];
-    let i = 0;
-    while (i < x.length - 2 && x[i + 1] <= v) i++;
-    return y[i] + (v - x[i]) * (y[i + 1] - y[i]) / (x[i + 1] - x[i]);
-  }
-  return m.plane[0] + yours.reduce((s, v, c) => s + m.plane[c + 1] * v, 0) +
-         m.points.reduce((s, q, i) => s + m.w[i] * adaptSpline(Math.hypot(...yours.map((v, c) => v - q[c]))), 0);
+  const line = adaptModels[joint][1];
+  return line[0] + yours.reduce((s, v, c) => s + line[c + 1] * v, 0);
 }
 
 // The fit, as adapt's: how much each matched point counts per digit (the thumb's MCP, IP and tip

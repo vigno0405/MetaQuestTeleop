@@ -100,10 +100,11 @@ release: `pip install -U metaquest-teleop` brings it to every computer.
 
 ### Some advice
 
-- **Start with the ends of a joint's range**, open and fully bent: two points are a straight line
-  through them. Add one in between only where the ADAPT joint goes wrong.
-- **Keep points apart.** Two points a few degrees of yours apart, with very different ADAPT
-  angles, make the joint jump between them.
+- **Start with the ends of a joint's range**, open and fully bent: two points are the straight
+  line through them. With more, each joint takes the line closest to them all (least squares),
+  so a point pulls the whole line towards it rather than bending it there.
+- **Remove the points you disagree with.** The library's points count as much as yours: if your
+  new point says otherwise, remove theirs (**×**), or the line ends up between the two.
 - With the fit on (the default), the fit places the **fingers**, so the panel offers the thumb's
   joints. To calibrate the fingers too, use `--no-adapt-fit`, while calibrating and after.
 
@@ -185,12 +186,9 @@ this pose. Each ADAPT joint follows angles of yours, those the dashboard and the
 
 The middle finger's spread follows nothing: it does not move.
 
-With **one angle of yours**, a joint goes straight from one point to the next, and on in a
-straight line beyond the first and the last: with two points, the line through them. With
-**two** (the thumb's CMC2), it follows the smoothest surface through the points (a thin-plate
-spline): with three, the plane through them; more bend it just enough to pass through each. A
-point bends the surface around it, and further away too, the more it disagrees with the others.
-Always within the joint's range.
+Each joint takes the straight line closest to its points (with **two angles of yours**, the
+thumb's CMC2, the plane), by least squares: through them with two points (three for CMC2),
+their best fit with more. Always within the joint's range.
 
 The library's first points were typical ranges, set so that, as with the real hand's poses of
 HumanManipulationVMC (Santello et al., 1998): your **open hand gives home**, all zeros; a
