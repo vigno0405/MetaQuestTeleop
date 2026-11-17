@@ -84,6 +84,28 @@
     text-align: right; color: var(--fg);
     font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12.5px;
   }
+  #calibrate { bottom: 16px; right: 16px; width: 320px; max-width: calc(100vw - 32px); }
+  #calibrate .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  #calibrate .head b { font-size: 15px; }
+  #calibrate .head b span { color: var(--warn); font-weight: 500; }
+  #calibrate label {
+    display: grid; grid-template-columns: 52px 1fr 44px; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--dim); margin-top: 6px;
+  }
+  #calibrate select {
+    grid-column: 2 / 4; background: var(--bg); color: var(--fg); border: 1px solid var(--edge);
+    border-radius: 6px; padding: 3px 6px; font: inherit;
+  }
+  #calibrate input[type="range"] { width: 100%; accent-color: #ff7b66; }
+  #calibrate label span { text-align: right; color: var(--fg); font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+  #cal-yours { margin-top: 6px; color: var(--dim); }
+  #calibrate .seg { margin-top: 8px; }
+  #cal-points td { padding: 1px 4px; }
+  #cal-points td:first-child { color: var(--fg); }
+  #cal-points button { padding: 0 6px; color: var(--dim); }
+  #cal-error { color: var(--bad); }
+  #cal-note code { white-space: normal; overflow-wrap: anywhere; }
+  body.calibrating #hint { display: none; }
   @media (max-width: 760px) {
     body.demo #demo { display: none; }
     body.demo #status { display: none; }
@@ -163,6 +185,19 @@
   <label>middle <input type="range" data-col="2" min="0" max="110" step="1"><span></span></label>
   <label>tip <input type="range" data-col="3" min="0" max="90" step="1"><span></span></label>
   <div class="caption">Pick a finger and move a slider. <span id="demo-hint"></span></div>
+</div>
+
+<div class="panel" id="calibrate" hidden>
+  <div class="head"><b>Calibrate <span id="cal-state"></span></b>
+    <div class="seg"><button id="cal-freeze" title="Hold your hand still in the view, and let go of the pose (Space)">Freeze</button></div></div>
+  <label>joint <select id="cal-joint"></select></label>
+  <div class="mono" id="cal-yours"></div>
+  <label>ADAPT <input type="range" id="cal-value" step="1"><span id="cal-value-text"></span></label>
+  <div class="seg"><button id="cal-add" title="Your angles now give the ADAPT joint this angle">Add point</button>
+    <button id="cal-reset" title="Back to this joint's default points">Default points</button></div>
+  <table class="angles mono" id="cal-points"></table>
+  <div class="caption" id="cal-error"></div>
+  <div class="caption" id="cal-note"></div>
 </div>
 
 <div class="panel" id="empty">
@@ -343,17 +378,31 @@ const ADAPT_FINGER_TRANSMISSIONS = {  // motor pulley, finger pulley, PIP cable 
 const ADAPT_THUMB_TRANSMISSION = { r_motor: 0.005, CMC1_pulley: 0.01346, CMC2_pulley: 0.00883,
                                    MCP_c: 0.00605, IP_c: 0.00577 };
 const ADAPT_SPREAD = { index: 1.0, middle: 0.0, ring: -1.0, pinky: -1.5 };
-// Your range for each ADAPT joint, as adapt.HUMAN_RANGES: the angles of yours (degrees) that give
-// the low and the high end of its range, in the ADAPT joints' order.
-const ADAPT_HUMAN = [
-  [5, 95], [0, 0], [0, 65], [0, 45],  // the thumb's CMC2: from adaptCmc2Poses
-  [20, 0], [0, 90], [0, 90], [0, 60], [0, 0], [0, 90], [0, 90], [0, 60],
-  [0, -15], [0, 90], [0, 90], [0, 60], [0, -25], [0, 90], [0, 90], [0, 60],
+// The ADAPT joints, as adapt.JOINTS; the angles of yours that each follows, as adapt.FOLLOWS; and
+// the calibration, as adapt.CALIBRATION: per joint, points [your angle(s)..., its angle], degrees.
+const ADAPT_NAMES = [
+  "thumb_CMC1", "thumb_CMC2", "thumb_MCP", "thumb_IP",
+  "index_spread", "index_MCP", "index_PIP", "index_DIP", "middle_spread", "middle_MCP", "middle_PIP", "middle_DIP",
+  "ring_spread", "ring_MCP", "ring_PIP", "ring_DIP", "pinky_spread", "pinky_MCP", "pinky_PIP", "pinky_DIP",
 ];
-let adaptRanges = ADAPT_HUMAN;  // metaquest-teleop sends its own, which you may have changed
-// The ADAPT thumb's CMC2 (degrees) for your thumb's base and spread (degrees): adapt.CMC2_POSES, as
-// [base, spread, CMC2] rows, and the smoothest surface through them, as adapt.cmc2.
-let adaptCmc2Poses = [[20, 35, 0], [70, 20, -60], [0, 30, 20]];  // metaquest-teleop sends its own
+const YOUR_COLUMNS = ["base", "spread", "middle", "tip"];
+let adaptFollows = Object.fromEntries(ADAPT_NAMES.map((j) => {  // metaquest-teleop sends its own
+  const [digit, joint] = j.split("_");
+  if (digit === "thumb") {
+    return [j, { CMC1: ["thumb turn"], CMC2: ["thumb base", "thumb spread"], MCP: ["thumb middle"], IP: ["thumb tip"] }[joint]];
+  }
+  if (j === "middle_spread") return [j, []];
+  return [j, [`${digit} ${{ spread: "spread", MCP: "base", PIP: "middle", DIP: "tip" }[joint]}`]];
+}));
+const ADAPT_CALIBRATION = {
+  thumb_CMC1: [[5, 0], [95, 86]], thumb_CMC2: [[20, 35, 0], [70, 20, -60], [0, 30, 20]],
+  thumb_MCP: [[0, 0], [65, 86]], thumb_IP: [[0, 0], [45, 90]],
+  index_spread: [[20, -17], [0, 0]], index_MCP: [[0, 0], [90, 86]], index_PIP: [[0, 0], [90, 69]], index_DIP: [[0, 0], [60, 69]],
+  middle_MCP: [[0, 0], [90, 86]], middle_PIP: [[0, 0], [90, 69]], middle_DIP: [[0, 0], [60, 69]],
+  ring_spread: [[0, 0], [-15, 17]], ring_MCP: [[0, 0], [90, 86]], ring_PIP: [[0, 0], [90, 69]], ring_DIP: [[0, 0], [60, 69]],
+  pinky_spread: [[0, 0], [-25, 17]], pinky_MCP: [[0, 0], [90, 86]], pinky_PIP: [[0, 0], [90, 69]], pinky_DIP: [[0, 0], [60, 69]],
+};
+let adaptCalibration = ADAPT_CALIBRATION;  // metaquest-teleop sends its own, which you may change
 const adaptClip = (joints) => joints.map((v, i) => Math.min(Math.max(v, ADAPT_LIMITS[i][0]), ADAPT_LIMITS[i][1]));
 
 // Joint angles = ADAPT_COUPLING (20 x 13) · motor angles.
@@ -396,48 +445,65 @@ const rotAxis = (axis, angle) => {
 // (`fit`, by default as metaquest-teleop's adapt.FIT): the pose that puts the ADAPT hand closest
 // to yours. Else joint for joint: each joint follows yours, your range stretched onto its range,
 // then the pose the ADAPT hand can take (each DIP mimics its PIP, one motor spreads the fingers).
-// `coupled` false: the joint-for-joint angles, before the motors.
-function adaptJoints(angles, joints, clip = true, coupled = true, fit = adaptFit) {
+// `coupled` false: the joint-for-joint angles, before the motors. `override`, [joint, radians]:
+// that joint at that angle instead, as a new calibration point would put it.
+function adaptJoints(angles, joints, clip = true, coupled = true, fit = adaptFit, override = null) {
   const wanted = adaptWanted(angles, joints);
+  if (override) wanted[override[0]] = override[1];
   if (!coupled) return clip ? adaptClip(wanted) : wanted;
-  const motors = fit ? adaptFitMotors(wanted, joints, clip) : adaptMotors(wanted, clip);
+  const motors = fit ? adaptFitMotors(wanted, joints, clip, override) : adaptMotors(wanted, clip);
   const out = ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0));
   return clip ? adaptClip(out) : out;  // only rounding to take off
 }
 
-// Joint for joint: your range stretched onto the ADAPT's (adaptRanges), as adapt._wanted.
-function adaptWanted(angles, joints) {
-  // Your thumb's first bone, in the ADAPT axes, read as the ADAPT's CMC joints turn theirs.
+// Your angles that the ADAPT joints follow, by name, in degrees, as adapt.your_angles: each finger's
+// base, spread, middle and tip, and the thumb's turn (its first bone, in the ADAPT axes, turned
+// about the hand's long axis as the ADAPT's CMC1 turns its own).
+function adaptYours(angles, joints) {
+  const out = {};
+  ADAPT_DIGITS.forEach((digit, f) => YOUR_COLUMNS.forEach((name, c) => { out[`${digit} ${name}`] = angles[f][c] * 180 / Math.PI; }));
   const rw = quatToMat(joints[0].slice(3, 7));
   const b = sub(joints[2].slice(0, 3), joints[1].slice(0, 3));
-  const d = norm([dot(column(rw, 0), b), -dot(column(rw, 1), b), -dot(column(rw, 2), b)]);
-  const yours = [Math.atan2(d[1], -d[0]), Math.asin(Math.min(Math.max(d[2], -1), 1)), angles[0][2], angles[0][3]];
-  for (let f = 1; f < 5; f++) yours.push(angles[f][1], angles[f][0], angles[f][2], angles[f][3]);
-  const wanted = yours.map((v, i) => {
-    const [lo, hi] = adaptRanges[i].map((x) => x * Math.PI / 180), [low, high] = ADAPT_LIMITS[i];
-    return hi === lo ? low : low + (v - lo) / (hi - lo) * (high - low);
-  });
-  wanted[1] = adaptCmc2(angles[0][0] * 180 / Math.PI, angles[0][1] * 180 / Math.PI) * Math.PI / 180;
-  return wanted;
+  const d = [dot(column(rw, 0), b), -dot(column(rw, 1), b), -dot(column(rw, 2), b)];
+  out["thumb turn"] = Math.atan2(d[1], -d[0]) * 180 / Math.PI;
+  return out;
 }
 
-// The ADAPT thumb's CMC2 (degrees) for your thumb's base and spread (degrees), as adapt.cmc2: the
-// thin-plate spline through adaptCmc2Poses, a plane bent just enough to pass through every pose.
+// Joint for joint: each ADAPT joint through its calibration points, radians, as adapt._wanted.
+function adaptWanted(angles, joints) {
+  const yours = adaptYours(angles, joints);
+  return ADAPT_NAMES.map((j) => adaptCalibrated(j, adaptFollows[j].map((name) => yours[name])) * Math.PI / 180);
+}
+
+// The ADAPT joint's angle (degrees) for these angles of yours (degrees), as adapt.calibrated: for
+// one angle of yours, straight from point to point and on beyond the ends; for more, the
+// thin-plate spline through the points (with three, the plane through them).
 const adaptSpline = (r) => (r > 0 ? r * r * Math.log(r) : 0);
-let adaptCmc2Surface = null;  // [poses, weights, plane] for the poses it was solved for
-function adaptCmc2(base, spread) {
-  if (!adaptCmc2Surface || adaptCmc2Surface[0] !== adaptCmc2Poses) {
-    const P = adaptCmc2Poses, n = P.length, A = [];
-    for (let i = 0; i < n; i++) {
-      A.push(P.map((q) => adaptSpline(Math.hypot(P[i][0] - q[0], P[i][1] - q[1]))).concat([1, P[i][0], P[i][1]]));
-    }
-    A.push(new Array(n).fill(1).concat([0, 0, 0]), P.map((q) => q[0]).concat([0, 0, 0]),
-           P.map((q) => q[1]).concat([0, 0, 0]));
-    const x = solveLinear(A, P.map((q) => q[2]).concat([0, 0, 0]));
-    adaptCmc2Surface = [P, x.slice(0, n), x.slice(n)];
+const adaptModels = {};  // joint -> [the points it was solved for, how it follows them]
+function adaptModel(points, k) {
+  if (k === 1) {
+    const sorted = points.slice().sort((p, q) => p[0] - q[0]);
+    return { x: sorted.map((p) => p[0]), y: sorted.map((p) => p[1]) };
   }
-  const [P, w, [a, b, c]] = adaptCmc2Surface;
-  return a + b * base + c * spread + P.reduce((s, q, i) => s + w[i] * adaptSpline(Math.hypot(base - q[0], spread - q[1])), 0);
+  const n = points.length, gap = (p, q) => Math.hypot(...p.slice(0, k).map((v, c) => v - q[c])), A = [];
+  for (let i = 0; i < n; i++) A.push(points.map((q) => adaptSpline(gap(points[i], q))).concat([1], points[i].slice(0, k)));
+  for (let c = 0; c <= k; c++) A.push(points.map((q) => (c === 0 ? 1 : q[c - 1])).concat(new Array(k + 1).fill(0)));
+  const x = solveLinear(A, points.map((q) => q[k]).concat(new Array(k + 1).fill(0)));
+  return { points, w: x.slice(0, n), plane: x.slice(n) };
+}
+function adaptCalibrated(joint, yours) {
+  const k = adaptFollows[joint].length, points = adaptCalibration[joint];
+  if (k === 0) return 0;
+  if (!adaptModels[joint] || adaptModels[joint][0] !== points) adaptModels[joint] = [points, adaptModel(points, k)];
+  const m = adaptModels[joint][1];
+  if (k === 1) {
+    const { x, y } = m, v = yours[0];
+    let i = 0;
+    while (i < x.length - 2 && x[i + 1] <= v) i++;
+    return y[i] + (v - x[i]) * (y[i + 1] - y[i]) / (x[i + 1] - x[i]);
+  }
+  return m.plane[0] + yours.reduce((s, v, c) => s + m.plane[c + 1] * v, 0) +
+         m.points.reduce((s, q, i) => s + m.w[i] * adaptSpline(Math.hypot(...yours.map((v, c) => v - q[c]))), 0);
 }
 
 // The fit, as adapt's: how much each matched point counts per digit (the thumb's MCP, IP and tip
@@ -558,10 +624,10 @@ function solveLinear(A, b) {
 
 // The motor angles that put the ADAPT hand closest to yours, as adapt._solve: Levenberg-Marquardt
 // from the joint-for-joint pose (`wanted`), within the motors' ranges if `clip`.
-const adaptLast = {};  // clip -> [joints, ranges, motors]: the last fit, for the next caller of that frame
-function adaptFitMotors(wanted, joints, clip = true) {
-  const last = adaptLast[clip];
-  if (last && last[0] === joints && last[1] === adaptRanges && last[3] === adaptCmc2Poses) return last[2].slice();
+const adaptLast = {};  // clip -> [joints, calibration, motors, override]: the last fit, for the next caller of that frame
+function adaptFitMotors(wanted, joints, clip = true, override = null) {
+  const last = adaptLast[clip], overridden = override ? override.join(":") : "";
+  if (last && last[0] === joints && last[1] === adaptCalibration && last[3] === overridden) return last[2].slice();
   const [low, high] = (clip ? ADAPT_MOTOR_RANGES : [new Array(13).fill(-Infinity), new Array(13).fill(Infinity)]).map((v) => v.slice());
   const [goal, gaps, pinch] = adaptTargets(joints);
   const start = adaptMotors(wanted, clip);
@@ -594,7 +660,7 @@ function adaptFitMotors(wanted, joints, clip = true) {
       if (damping > 1e10) break;
     }
   }
-  adaptLast[clip] = [joints, adaptRanges, m, adaptCmc2Poses];
+  adaptLast[clip] = [joints, adaptCalibration, m, overridden];
   return m.slice();
 }
 
@@ -672,6 +738,9 @@ const state = {
   follow: true, trail: true, axes: true,
   show: params.get("show") === "adapt" ? "adapt" : "hand",  // in Room: your hand, or the ADAPT hand
 };
+// Calibrating (metaquest-teleop --calibration): your hand frozen or not, the joint, whether you
+// moved its slider since, and what the panel shows.
+const cal = { frozen: false, joint: "thumb_IP", touched: false, options: "", shown: "" };
 // The starting viewpoints. Room: about where your eyes are, a little above and towards the
 // middle from the selected hand, so it looks as you see it. Hand: from the thumb's side.
 function home(mode, side) {
@@ -698,10 +767,10 @@ function connect() {
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.status) status = msg.status;
-    if (msg.status && msg.status.human_ranges) adaptRanges = msg.status.human_ranges;
+    if (msg.status && msg.status.calibration) adaptCalibration = msg.status.calibration;
+    if (msg.status && msg.status.follows) adaptFollows = msg.status.follows;
     if (msg.status && typeof msg.status.adapt_fit === "boolean") adaptFit = msg.status.adapt_fit;
-    if (msg.status && msg.status.cmc2_poses) adaptCmc2Poses = msg.status.cmc2_poses;
-    if (msg.frame) {
+    if (msg.frame && !cal.frozen) {  // frozen: your hand stays as it was
       frame = msg.frame;
       lastFrameAt = performance.now();
       everFrame = true;
@@ -713,7 +782,7 @@ function connect() {
 }
 if (DEMO) linkUp = true; else connect();
 
-const fresh = () => performance.now() - lastFrameAt < STALE_MS;
+const fresh = () => cal.frozen || performance.now() - lastFrameAt < STALE_MS;
 
 // ------------------------------------------------------------------------------- drawing
 const canvas = document.getElementById("scene");
@@ -984,7 +1053,7 @@ function drawAdapt(cam, hand, alpha) {
 
   // The ADAPT base frame to the screen, with its wrist (the palm's origin) at the robot's place.
   const robot = (a) => [a[0] - ADAPT_PALM[0] + ADAPT_GAP, a[2] - ADAPT_PALM[2], -(a[1] - ADAPT_PALM[1])];
-  const motors = adaptMotors(adaptJoints(handAngles(hand), hand.joints));
+  const motors = adaptMotors(adaptJoints(handAngles(hand), hand.joints, true, true, adaptFit, calOverride()));
   const joints = ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0));
   const pts = adaptPositions(joints);
   const wrist = robot(ADAPT_PALM);
@@ -1120,9 +1189,10 @@ function updatePanels() {
   $("human-panel").hidden = $("hand-wrist").hidden = $("hand-pinch").hidden = adaptShown;
   $("adapt-panel").hidden = !adaptShown;
   if (state.mode === "adapt") {
-    updateAdaptPanel(hand ? adaptJoints(handAngles(hand), hand.joints) : null,
+    updateAdaptPanel(hand ? adaptJoints(handAngles(hand), hand.joints, true, true, adaptFit, calOverride()) : null,
                      hand ? adaptJoints(handAngles(hand), hand.joints, false, false) : null);
   }
+  updateCalibration();
   if (showRobot) {
     updateAdaptPanel(hand ? adaptJoints(handAngles(hand), hand.joints) : null,
                      hand ? adaptJoints(handAngles(hand), hand.joints, false, false) : null);
@@ -1154,7 +1224,7 @@ function updatePanels() {
     title = "Not connected";
     body = "<p>This page gets the hands from <code>metaquest-teleop</code> (or your script using " +
            "<code>QuestHands</code>). Start it again; the page reconnects by itself.</p>";
-  } else if (!everFrame || age > 2) {
+  } else if (!cal.frozen && (!everFrame || age > 2)) {
     title = everFrame ? "No frames for a while" : "Waiting for hands";
     body = `<p>With the headset: open <b>${page}</b> in the Quest browser and press Start.</p>` +
            "<p>Without it: run <code>metaquest-teleop-fake</code> in another terminal " +
@@ -1230,6 +1300,112 @@ $("demo-hint").textContent = EMBEDDED ? "Drag to turn the view; Ctrl + scroll to
                                       : "Drag to turn the view; scroll to zoom.";
 
 setInterval(updatePanels, 80);
+
+// ------------------------------------------------------------------------------- calibration
+// With metaquest-teleop --calibration, in the ADAPT view: freeze your hand in a pose, give an ADAPT
+// joint the angle it should take there, and add the point; metaquest-teleop saves it.
+const calOn = () => !DEMO && Boolean(status && status.calibrating) && state.mode === "adapt";
+const calIndex = () => ADAPT_NAMES.indexOf(cal.joint);
+const escapeHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+// The joints it moves: the thumb's, and the fingers' when the fit does not place them.
+const calJoints = () => ADAPT_NAMES.filter((j, i) => adaptFollows[j].length && (i < 4 || !adaptFit));
+// The joint as the point you are trying would put it: [joint, radians]; null when not trying one.
+const calOverride = () => (calOn() && cal.frozen && cal.touched ? [calIndex(), Number($("cal-value").value) * Math.PI / 180] : null);
+
+function toggleFreeze() {
+  if (!calOn()) return;
+  cal.frozen = !cal.frozen;
+  cal.touched = false;
+  $("cal-error").textContent = "";
+}
+
+// Give the joint these points (null: its default ones); the server saves them all.
+async function calSend(points) {
+  $("cal-error").textContent = "";
+  try {
+    const response = await fetch("/calibration", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(points ? { joint: cal.joint, points } : { joint: cal.joint }),
+    });
+    const answer = await response.json().catch(() => ({}));
+    if (!response.ok || answer.error) throw new Error(answer.error || `metaquest-teleop answered ${response.status}`);
+    adaptCalibration = answer.calibration;
+    cal.touched = false;
+  } catch (err) {
+    $("cal-error").textContent = `Not saved: ${err.message || err}`;
+  }
+}
+
+function updateCalibration() {
+  const on = calOn();
+  $("calibrate").hidden = !on;
+  document.body.classList.toggle("calibrating", on);
+  if (!on) { cal.frozen = false; return; }
+  const joints = calJoints();
+  if (joints.join() !== cal.options) {
+    cal.options = joints.join();
+    $("cal-joint").innerHTML = joints.map((j) => `<option value="${j}">${j.replace("_", " ")}</option>`).join("");
+    if (!joints.includes(cal.joint)) cal.joint = joints.includes("thumb_IP") ? "thumb_IP" : joints[0];
+    $("cal-joint").value = cal.joint;
+  }
+  const hand = frame && frame[state.side], follows = adaptFollows[cal.joint], slider = $("cal-value");
+  [slider.min, slider.max] = ADAPT_LIMITS[calIndex()].map((v) => Math.round(v * 180 / Math.PI));
+  $("cal-state").textContent = cal.frozen ? "· frozen" : "";
+  $("cal-freeze").textContent = cal.frozen ? "Unfreeze" : "Freeze";
+  $("cal-freeze").classList.toggle("on", cal.frozen);
+  if (hand) {
+    const yours = adaptYours(handAngles(hand), hand.joints);
+    $("cal-yours").textContent = "yours: " + follows.map((name) => `${name} ${yours[name].toFixed(1)}°`).join(", ");
+    if (!cal.touched) slider.value = Math.round(adaptJoints(handAngles(hand), hand.joints, true, false)[calIndex()] * 180 / Math.PI);
+  } else {
+    $("cal-yours").textContent = "yours: not tracked";
+  }
+  slider.disabled = $("cal-add").disabled = !cal.frozen || !hand;
+  $("cal-value-text").textContent = `${slider.value}°`;
+
+  const points = adaptCalibration[cal.joint] || [], k = follows.length, fewest = k === 1 ? 2 : k + 1;
+  const shown = cal.joint + JSON.stringify(points);
+  if (shown !== cal.shown) {  // only when they change: a click on a row must find it there
+    cal.shown = shown;
+    $("cal-points").innerHTML = `<tr><th>yours: ${escapeHtml(follows.map((name) => name.split(" ")[1]).join(", "))}</th><th>ADAPT</th><th></th></tr>` +
+      points.map((p, n) => `<tr><td>${p.slice(0, k).map((v) => `${Number(v)}°`).join(", ")}</td><td>${Number(p[k])}°</td>` +
+        `<td><button data-point="${n}" title="Remove this point"${points.length <= fewest ? " disabled" : ""}>×</button></td></tr>`).join("");
+  }
+  $("cal-note").innerHTML = (adaptFit ? "The fit places the fingers: start with <code>--no-adapt-fit</code> to calibrate them too. " : "") +
+    `Saved to <code>${escapeHtml(status.calibrating)}</code>.`;
+}
+
+$("cal-freeze").addEventListener("click", toggleFreeze);
+$("cal-joint").addEventListener("change", () => {
+  cal.joint = $("cal-joint").value;
+  cal.touched = false;
+  $("cal-error").textContent = "";
+});
+$("cal-value").addEventListener("input", () => {
+  cal.touched = true;
+  $("cal-value-text").textContent = `${$("cal-value").value}°`;
+});
+$("cal-add").addEventListener("click", () => {
+  const hand = frame && frame[state.side];
+  if (!cal.frozen || !hand) return;
+  const yours = adaptYours(handAngles(hand), hand.joints);
+  const at = adaptFollows[cal.joint].map((name) => Math.round(yours[name] * 10) / 10);
+  const there = (p) => at.every((v, c) => p[c] === v);  // a point already at your angles: replaced
+  calSend((adaptCalibration[cal.joint] || []).filter((p) => !there(p)).concat([at.concat([Number($("cal-value").value)])]));
+});
+$("cal-reset").addEventListener("click", () => calSend(null));
+$("cal-points").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-point]");
+  if (b) calSend(adaptCalibration[cal.joint].filter((_, n) => n !== Number(b.dataset.point)));
+});
+// Buttons give the focus back, so that Space freezes and unfreezes, and never clicks one twice.
+document.querySelectorAll("#calibrate button").forEach((b) => b.addEventListener("click", () => b.blur()));
+$("cal-points").addEventListener("click", () => document.activeElement.blur && document.activeElement.blur());
+window.addEventListener("keydown", (e) => {
+  if (e.code !== "Space" || !calOn() || e.target.tagName === "SELECT") return;
+  e.preventDefault();
+  toggleFreeze();
+});
 
 // ------------------------------------------------------------------------------- controls
 function syncControls() {

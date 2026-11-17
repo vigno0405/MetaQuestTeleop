@@ -67,14 +67,29 @@ Below, *method* is something you call with `()`, like `quest.wait()`; *property*
 .. autodata:: metaquest_teleop.adapt.COUPLING
    :no-value:
 
-.. autodata:: metaquest_teleop.adapt.HUMAN_RANGES
-   :no-value:
-
 .. autodata:: metaquest_teleop.adapt.FIT
 
-.. autodata:: metaquest_teleop.adapt.CMC2_POSES
+.. autodata:: metaquest_teleop.adapt.CALIBRATION
+   :no-value:
 
-.. autofunction:: metaquest_teleop.adapt.cmc2
+.. autodata:: metaquest_teleop.adapt.FOLLOWS
+   :no-value:
+
+.. autodata:: metaquest_teleop.adapt.YOUR_ANGLES
+   :no-value:
+
+.. autodata:: metaquest_teleop.adapt.CALIBRATION_FILE
+   :no-value:
+
+.. autofunction:: metaquest_teleop.adapt.load_calibration
+
+.. autofunction:: metaquest_teleop.adapt.save_calibration
+
+.. autofunction:: metaquest_teleop.adapt.reset_calibration
+
+.. autofunction:: metaquest_teleop.adapt.your_angles
+
+.. autofunction:: metaquest_teleop.adapt.calibrated
 ```
 
 ## Names

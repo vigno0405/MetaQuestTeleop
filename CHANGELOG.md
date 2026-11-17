@@ -1,10 +1,21 @@
 # Changelog
 
-## 0.10.1 (2026-11-16)
+## 0.11.0 (2026-11-17)
 
-- The ADAPT thumb's IP goes from 0 to 90°, as in VirtualModelControl (it was 0 to 69°).
-- It turns twice as far as yours: your 0 to 45° gives its whole range
-  (`adapt.HUMAN_RANGES["thumb_IP"] = (0, 45)`; it was 0 to 80°).
+- Calibrate the ADAPT hand to your hand: `metaquest-teleop --calibration` opens the 3D view with
+  a Calibrate panel. Freeze your hand in a pose (Space), drag an ADAPT joint to where it should
+  be, and add the point. Your points are saved to
+  `~/.config/metaquest-teleop/adapt_calibration.json` and loaded every time `metaquest-teleop`
+  starts (`--calibration-file FILE` for another, `--no-calibration-file` for the default one).
+- One calibration for every joint, `adapt.CALIBRATION`: points of yours and the ADAPT angle
+  there, in degrees, through which the joint goes (straight from point to point; for the thumb's
+  CMC2, from your base and spread, the thin-plate spline as before). It replaces
+  `adapt.HUMAN_RANGES` (two points per joint) and `adapt.CMC2_POSES`; `adapt.calibrated()`
+  replaces `adapt.cmc2()`. The defaults give the same hand as before.
+- `adapt.load_calibration()`, `adapt.save_calibration()` and `adapt.reset_calibration()`;
+  `adapt.your_angles(hand)` gives your angles that the joints follow (`adapt.FOLLOWS`), by name.
+- The ADAPT thumb's IP goes from 0 to 90°, as in VirtualModelControl (it was 0 to 69°), and turns
+  twice as far as yours: your 0 to 45° gives its whole range (it was 0 to 80°).
 
 ## 0.10.0 (2026-11-16)
 

@@ -23,6 +23,18 @@ VIEW = files("metaquest_teleop") / "view.html"
 MIRROR = np.diag([-1.0, 1.0, 1.0])
 
 
+@pytest.fixture(autouse=True)
+def _calibration(tmp_path, monkeypatch):
+    """Every test starts from the default ADAPT calibration, and none reads or writes yours."""
+    from metaquest_teleop import adapt
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))  # and the commands the tests run
+    monkeypatch.setattr(adapt, "CALIBRATION_FILE", tmp_path / "config" / "metaquest-teleop" / "adapt_calibration.json")
+    adapt.reset_calibration()
+    yield
+    adapt.reset_calibration()
+
+
 def _angles(rng):
     return np.stack([rng.uniform(-0.3, 1.5, 5), rng.uniform(-0.4, 0.4, 5),
                      rng.uniform(0.0, 1.6, 5), rng.uniform(0.0, 1.2, 5)], axis=1)
@@ -283,11 +295,11 @@ def test_the_3d_view_knows_whether_the_adapt_hand_is_on():
             status = asyncio.run(statuses(port))
             seen[use_adapt] = status["adapt"]
     assert seen == {True: True, False: False}
-    # and your ranges as they are now, for the view to map your hand as the library does
-    assert status["human_ranges"] == [list(map(float, adapt.HUMAN_RANGES.get(j, (0, 0)))) for j in adapt.JOINTS]
-    # and the poses that give the thumb's CMC2 from yours
-    assert status["cmc2_poses"] == [[float(b), float(s), float(v)] for (b, s), v in adapt.CMC2_POSES.items()]
+    # and your calibration as it is now, for the view to map your hand as the library does
+    assert status["calibration"] == {j: adapt._rows(points) for j, points in adapt.CALIBRATION.items()}
+    assert status["follows"] == {j: list(names) for j, names in adapt.FOLLOWS.items()}
     assert status["adapt_fit"] is True  # and whether it fits the ADAPT hand to yours
+    assert status["calibrating"] is None  # the view calibrates only with metaquest-teleop --calibration
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
@@ -411,17 +423,152 @@ def test_adapt_geometry_is_the_one_of_virtualmodelcontrol():
             assert np.allclose(np.ravel(kin.position(q, f"{digit}/tip")), ours[digit][-1], atol=1e-12)
 
 
-def test_your_ranges_can_be_changed_at_any_time():
+def test_your_calibration_can_be_changed_at_any_time():
     from metaquest_teleop import adapt
 
     hand = synthetic_hand("right", np.array([[0.4, 0.5, 0.3, 0.3]] + [[0.4, 0.0, 0.5, 0.3]] * 4), _pose(np.random.default_rng(2)))
     before = adapt.joint_angles(hand, fit=False)[5]  # index MCP, from your 0..90°, joint for joint
-    saved = adapt.HUMAN_RANGES["index_MCP"]
-    try:
-        adapt.HUMAN_RANGES["index_MCP"] = (0, 45)  # your index bends half as much: the same bend is twice
-        assert adapt.joint_angles(hand, fit=False)[5] == pytest.approx(min(2 * before, adapt.JOINT_LIMITS["index_MCP"][1]))
-    finally:
-        adapt.HUMAN_RANGES["index_MCP"] = saved
+    adapt.CALIBRATION["index_MCP"] = {0: 0, 45: 86}  # your index bends half as much: the same bend is twice
+    assert adapt.joint_angles(hand, fit=False)[5] == pytest.approx(min(2 * before, adapt.JOINT_LIMITS["index_MCP"][1]))
+
+
+def test_each_joint_goes_through_every_point_of_yours():
+    from metaquest_teleop import adapt
+
+    # One angle of yours: straight from point to point, and on beyond the first and the last.
+    adapt.CALIBRATION["thumb_IP"] = {0: 0, 20: 30, 45: 90}
+    for yours, its in ((0, 0), (20, 30), (45, 90), (10, 15), (30, 54), (60, 126), (-10, -15)):
+        assert adapt.calibrated("thumb_IP", yours) == pytest.approx(its, abs=1e-12)
+    hand = synthetic_hand("right", np.array([[0.4, 0.5, 0.3, np.radians(60)]] + [[0.4, 0.0, 0.5, 0.3]] * 4), _pose(np.random.default_rng(3)))
+    for fit in (True, False):  # then within its limits: 126° is its 90°
+        assert np.degrees(adapt.joint_angles(hand, fit=fit)[3]) == pytest.approx(90)
+        assert np.degrees(adapt.joint_angles(hand, fit=fit, clip=False)[3]) == pytest.approx(126)
+    assert adapt.calibrated("middle_spread") == 0  # it follows none of yours
+    # Not enough points, or not the angles it follows: a clear error.
+    for points in ({0: 0}, {(0, 1): 0, (1, 2): 3}):
+        adapt.CALIBRATION["thumb_IP"] = points
+        with pytest.raises(ValueError, match="thumb_IP"):
+            adapt.calibrated("thumb_IP", 10)
+    adapt.CALIBRATION["thumb_CMC2"] = {(0, 0): 0, (10, 10): 5, (20, 20): 10}  # on one line: no surface
+    with pytest.raises(ValueError, match="not all on one line"):
+        adapt.calibrated("thumb_CMC2", 5, 5)
+    with pytest.raises(TypeError):
+        adapt.calibrated("thumb_CMC2", 5)  # it follows two angles of yours
+
+
+def test_the_calibration_is_saved_and_loaded(tmp_path):
+    from metaquest_teleop import adapt
+
+    path = tmp_path / "mine.json"
+    assert adapt.load_calibration(path) is False and adapt.CALIBRATION == adapt._DEFAULT_CALIBRATION  # none yet
+    adapt.CALIBRATION["thumb_IP"] = {0: 0, 20: 30, 45: 90}
+    adapt.CALIBRATION["thumb_CMC2"][(45, 25)] = -20
+    assert adapt.save_calibration(path) == path
+    assert json.loads(path.read_text()) == {  # only what is not the default, in degrees
+        "thumb_CMC2": [[20, 35, 0], [70, 20, -60], [0, 30, 20], [45, 25, -20]], "thumb_IP": [[0, 0], [20, 30], [45, 90]]}
+    hand = synthetic_hand("right", np.array([[0.8, 0.4, 0.3, np.radians(20)]] + [[0.4, 0.0, 0.5, 0.3]] * 4), _pose(np.random.default_rng(4)))
+    mine = adapt.joint_angles(hand)
+    adapt.reset_calibration()
+    assert adapt.CALIBRATION == adapt._DEFAULT_CALIBRATION
+    assert not np.allclose(adapt.joint_angles(hand), mine)
+    assert adapt.load_calibration(path) is True
+    assert np.allclose(adapt.joint_angles(hand), mine)
+    adapt.CALIBRATION["index_MCP"] = {0: 0, 45: 86}
+    adapt.reset_calibration("index_MCP")  # one joint back to its default points
+    assert adapt.CALIBRATION["index_MCP"] == {0: 0, 90: 86} and adapt.CALIBRATION["thumb_IP"] == {0: 0, 20: 30, 45: 90}
+    assert adapt.save_calibration() == adapt.CALIBRATION_FILE and adapt.load_calibration()  # by default, there
+    adapt.reset_calibration()
+    adapt.save_calibration(path)
+    assert json.loads(path.read_text()) == {}  # all defaults
+    # Not a calibration: refused, and nothing changes.
+    for bad in ("nope", "[1, 2]", '{"thumb_IP": [[0, 0]]}', '{"thumb_IP": [[0, 0, 1], [1, 2, 3]]}',
+                '{"wrist": [[0, 0], [1, 1]]}', '{"middle_spread": [[0, 0], [1, 1]]}', '{"thumb_IP": [[0, true], [1, 2]]}'):
+        path.write_text(bad)
+        adapt.CALIBRATION["thumb_IP"] = {0: 0, 30: 90}
+        with pytest.raises(ValueError, match="not an ADAPT calibration"):
+            adapt.load_calibration(path)
+        assert adapt.CALIBRATION["thumb_IP"] == {0: 0, 30: 90}
+
+
+def test_the_3d_view_calibrates_only_with_metaquest_teleop_calibration(tmp_path):
+    import aiohttp
+
+    from metaquest_teleop import adapt
+
+    path = tmp_path / "calibration" / "adapt_calibration.json"
+
+    async def post(port, body, as_json=True):
+        async with aiohttp.ClientSession() as session:
+            sent = {"json": body} if as_json else {"data": json.dumps(body)}
+            async with session.post(f"http://127.0.0.1:{port}/calibration", **sent) as r:
+                return r.status, await r.json() if r.content_type == "application/json" else await r.text()
+
+    port = _free_port()
+    with QuestHands(port, adb=False) as quest:
+        status, _ = asyncio.run(post(port, {"joint": "thumb_IP", "points": [[0, 0], [30, 90]]}))
+        assert status == 404 and not path.exists()  # not calibrating
+        quest.calibration = path
+        assert quest._view_status()["calibrating"] == str(path)
+        status, answer = asyncio.run(post(port, {"joint": "thumb_IP", "points": [[30, 90], [0, 0]]}))
+        assert status == 200 and answer["calibration"]["thumb_IP"] == [[0, 0], [30, 90]]  # in order
+        assert adapt.CALIBRATION["thumb_IP"] == {0: 0, 30: 90}
+        assert json.loads(path.read_text()) == {"thumb_IP": [[0, 0], [30, 90]]}
+        for bad in ({"joint": "thumb_IP", "points": [[0, 0]]}, {"joint": "middle_spread", "points": [[0, 0], [1, 1]]},
+                    {"joint": "nope"}, {"points": []}, [1]):
+            status, answer = asyncio.run(post(port, bad))
+            assert status == 400 and answer["error"], bad
+        assert adapt.CALIBRATION["thumb_IP"] == {0: 0, 30: 90}  # unchanged
+        status, _ = asyncio.run(post(port, {"joint": "thumb_IP"}, as_json=False))
+        assert status == 415  # not JSON: another web page cannot send it
+        status, answer = asyncio.run(post(port, {"joint": "thumb_IP"}))  # back to its default points
+        assert status == 200 and adapt.CALIBRATION["thumb_IP"] == {0: 0, 45: 90}
+        assert json.loads(path.read_text()) == {}
+
+
+def test_the_command_line_loads_the_calibration_and_checks_its_options(tmp_path, monkeypatch, capsys):
+    import sys
+
+    from metaquest_teleop import adapt
+    from metaquest_teleop.cli import main
+
+    def run(*args):
+        monkeypatch.setattr(sys, "argv", ["metaquest-teleop", *args])
+        return main()
+
+    for args in (["--calibration", "--no-adapt"], ["--calibration", "--no-calibration-file"],
+                 ["--calibration-file", "x.json", "--no-calibration-file"]):
+        with pytest.raises(SystemExit):
+            run(*args)
+    bad = tmp_path / "bad.json"
+    bad.write_text("[]")
+    assert run("--calibration-file", str(bad), "--no-adb", "--no-ros") == 1
+    assert "not an ADAPT calibration" in capsys.readouterr().out
+    assert run("--calibration-file", str(tmp_path / "none.json"), "--no-adb", "--no-ros") == 1
+    assert "No ADAPT calibration in" in capsys.readouterr().out
+
+    # Started, it loads yours from where --calibration saves it, unless --no-calibration-file.
+    adapt.CALIBRATION["thumb_IP"] = {0: 0, 30: 90}
+    saved = adapt.save_calibration()
+    adapt.reset_calibration()
+    for extra, said in (([], f"ADAPT calibration: {saved}"), (["--no-calibration-file"], "ADAPT calibration: the default one")):
+        port = _free_port()
+        process = subprocess.Popen([sys.executable, "-m", "metaquest_teleop", "--no-adb", "--no-ros", "--plain",
+                                    "--port", str(port), *extra], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        guard = threading.Timer(30.0, process.kill)
+        guard.start()
+        try:
+            lines = []
+            for line in process.stdout:
+                lines.append(line.rstrip("\n"))
+                if line.startswith("page "):
+                    break
+            process.terminate()
+            process.communicate(timeout=10)
+        finally:
+            guard.cancel()
+            if process.poll() is None:
+                process.kill()
+        assert said in lines, lines
 
 
 def test_joint_for_joint_the_adapt_hand_does_what_yours_does():
@@ -464,36 +611,30 @@ def test_the_thumbs_cmc2_follows_your_base_and_spread_through_your_poses():
     from metaquest_teleop import adapt
 
     # Through every pose of yours exactly: (base, spread) -> CMC2, degrees.
-    for (base, spread), cmc2 in adapt.CMC2_POSES.items():
-        assert adapt.cmc2(base, spread) == pytest.approx(cmc2, abs=1e-9)
+    for (base, spread), cmc2 in adapt.CALIBRATION["thumb_CMC2"].items():
+        assert adapt.calibrated("thumb_CMC2", base, spread) == pytest.approx(cmc2, abs=1e-9)
     # Both ways, the ADAPT's CMC2 is that surface at your thumb's base and spread, within its range.
     low, high = adapt.JOINT_LIMITS["thumb_CMC2"]
     rng = np.random.default_rng(50)
     for _ in range(20):
         hand = synthetic_hand("right", _angles(rng), _pose(rng))
         base, spread = np.degrees(hand.angles[0, :2])
-        want = np.clip(np.radians(adapt.cmc2(base, spread)), low, high)
+        want = np.clip(np.radians(adapt.calibrated("thumb_CMC2", base, spread)), low, high)
         for fit in (True, False):
             assert adapt.joint_angles(hand, fit=fit)[1] == pytest.approx(want, abs=1e-9)
-    # Smooth between the poses: no jump anywhere on a fine grid.
-    grid = np.array([[adapt.cmc2(b, s) for s in np.arange(-10, 61, 0.5)] for b in np.arange(-10, 91, 0.5)])
+    # Three poses: the plane through them.
+    for base, spread in ((10, 10), (50, 40), (80, 0)):
+        assert adapt.calibrated("thumb_CMC2", base, spread) == pytest.approx((100 - 12 * base + 4 * spread) / 11, abs=1e-9)
+    # A fourth: through it too, and smooth between them: no jump anywhere on a fine grid.
+    adapt.CALIBRATION["thumb_CMC2"][(45, 25)] = -20
+    assert adapt.calibrated("thumb_CMC2", 45, 25) == pytest.approx(-20, abs=1e-9)
+    grid = np.array([[adapt.calibrated("thumb_CMC2", b, s) for s in np.arange(-10, 61, 0.5)] for b in np.arange(-10, 91, 0.5)])
     assert np.abs(np.diff(grid, axis=0)).max() < 2 and np.abs(np.diff(grid, axis=1)).max() < 2
     # -60° is within reach: CMC2 goes from -70° to 30°, as in virtualmodelcontrol.
     assert np.degrees([low, high]) == pytest.approx([-70, 30])
-    # And you can change the poses at any time.
-    saved = dict(adapt.CMC2_POSES)
-    try:
-        adapt.CMC2_POSES.clear()
-        adapt.CMC2_POSES.update({(0, 0): 10, (90, 0): 10, (0, 90): 10})  # always 10°
-        hand = synthetic_hand("right", _angles(rng), _pose(rng))
-        assert np.degrees(adapt.joint_angles(hand)[1]) == pytest.approx(10)
-        adapt.CMC2_POSES.clear()  # three poses: the plane through them
-        adapt.CMC2_POSES.update({(20, 35): 0, (70, 20): -60, (0, 30): 20})
-        for base, spread in ((10, 10), (50, 40), (80, 0)):
-            assert adapt.cmc2(base, spread) == pytest.approx((100 - 12 * base + 4 * spread) / 11, abs=1e-9)
-    finally:
-        adapt.CMC2_POSES.clear()
-        adapt.CMC2_POSES.update(saved)
+    adapt.CALIBRATION["thumb_CMC2"] = {(0, 0): 10, (90, 0): 10, (0, 90): 10}  # always 10°
+    hand = synthetic_hand("right", _angles(rng), _pose(rng))
+    assert np.degrees(adapt.joint_angles(hand)[1]) == pytest.approx(10)
 
 
 def _adapt_shaped_hand(joints):
@@ -623,20 +764,23 @@ def test_adapt_joints_take_your_angles_and_the_motors_reduce_them():
 
     rng = np.random.default_rng(10)
     hand = synthetic_hand("right", _angles(rng), _pose(rng))
-    # Joint by joint, before the couplings and limits: yours, your range stretched onto its range.
-    a, joints = hand.angles, adapt.joint_angles(hand, clip=False, coupled=False)
+    # Your angles: those of the dashboard, and your thumb's turn, read as the ADAPT's CMC1 turns.
+    a, yours = np.degrees(hand.angles), adapt.your_angles(hand)
+    assert list(yours) == list(adapt.YOUR_ANGLES)
+    for f, finger in enumerate(("thumb", "index", "middle", "ring", "pinky")):
+        for c, column in enumerate(("base", "spread", "middle", "tip")):
+            assert yours[f"{finger} {column}"] == pytest.approx(a[f, c], abs=1e-12)
     bone = np.diag([1.0, -1.0, -1.0]) @ hand.rotations[0].T @ (hand.positions[2] - hand.positions[1])
-    bone /= np.linalg.norm(bone)
-    yours = [np.arctan2(bone[1], -bone[0]), np.arcsin(bone[2]), a[0, 2], a[0, 3]]  # CMC1, CMC2 as the ADAPT's
-    for f in range(1, 5):
-        yours += [a[f, 1], a[f, 0], a[f, 2], a[f, 3]]
+    assert yours["thumb turn"] == pytest.approx(np.degrees(np.arctan2(bone[1], -bone[0])), abs=1e-12)
+    # Joint by joint, before the couplings and limits: each through its calibration...
+    joints = adapt.joint_angles(hand, clip=False, coupled=False)
     for i, name in enumerate(adapt.JOINTS):
-        if name == "thumb_CMC2":  # from your thumb's base and spread, through CMC2_POSES
-            assert joints[i] == pytest.approx(np.radians(adapt.cmc2(*np.degrees(a[0, :2]))), abs=1e-12)
-            continue
-        (h_low, h_high), (low, high) = np.radians(adapt.HUMAN_RANGES[name]), adapt.JOINT_LIMITS[name]
-        share = 0.0 if h_high == h_low else (yours[i] - h_low) / (h_high - h_low)
-        assert joints[i] == pytest.approx(low + share * (high - low), abs=1e-12), name
+        want = adapt.calibrated(name, *(yours[n] for n in adapt.FOLLOWS[name]))
+        assert joints[i] == pytest.approx(np.radians(want), abs=1e-12), name
+    # ... by default your range stretched onto its own: say the index MCP, your 0..90° its 0..86°.
+    assert np.degrees(joints[5]) == pytest.approx(yours["index base"] / 90 * 86, abs=1e-9)
+    assert np.degrees(joints[0]) == pytest.approx((yours["thumb turn"] - 5) / 90 * 86, abs=1e-9)
+    assert np.degrees(joints[4]) == pytest.approx(yours["index spread"] / 20 * -17, abs=1e-9)
 
     motors = adapt.motor_angles(joints, clip=False)
     back = adapt.COUPLING @ motors
@@ -671,8 +815,16 @@ def test_adapt_wrist_pose_has_the_axes_of_the_adapt_base():
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
-def test_the_3d_views_adapt_hand_is_the_python_one(tmp_path):
+@pytest.mark.parametrize("calibration", ["default", "yours"])
+def test_the_3d_views_adapt_hand_is_the_python_one(tmp_path, calibration):
     from metaquest_teleop import adapt
+
+    if calibration == "yours":  # more points, and points elsewhere: the view follows them as the library does
+        adapt.CALIBRATION["thumb_IP"] = {0: 0, 20: 30, 45: 90}
+        adapt.CALIBRATION["thumb_CMC2"] = {(20, 35): 0, (70, 20): -60, (0, 30): 20, (45, 25): -20}
+        adapt.CALIBRATION["thumb_CMC1"] = {0: 10, 60: 50, 100: 80}
+        adapt.CALIBRATION["index_MCP"] = {0: 0, 45: 86}
+        adapt.CALIBRATION["ring_spread"] = {-20: 17, 5: 0, 0: 2}
 
     html = VIEW.read_text(encoding="utf-8")
     from dataclasses import replace
@@ -687,13 +839,16 @@ def test_the_3d_views_adapt_hand_is_the_python_one(tmp_path):
             hands.append(replace(h, positions=p))
     script = tmp_path / "adapt.js"
     script.write_text(html.split("// math-begin")[1].split("// math-end")[0] + f"""
+const defaults = {{ names: ADAPT_NAMES, follows: adaptFollows, calibration: adaptCalibration }};
+adaptCalibration = {json.dumps({j: adapt._rows(points) for j, points in adapt.CALIBRATION.items()})};
 const hands = {json.dumps([[h.angles.tolist(), np.hstack([h.positions, h.quaternions]).tolist()] for h in hands])};
 const joints = hands.map(([a, j]) => adaptJoints(a, j));
 const raw = hands.map(([a, j]) => adaptJoints(a, j, false));
 const direct = hands.map(([a, j]) => adaptJoints(a, j, true, true, false));
 const directRaw = hands.map(([a, j]) => adaptJoints(a, j, false, true, false));
 process.stdout.write(JSON.stringify({{
-  coupling: ADAPT_COUPLING, joints, raw, direct, directRaw,
+  coupling: ADAPT_COUPLING, joints, raw, direct, directRaw, defaults,
+  yours: hands.map(([a, j]) => adaptYours(a, j)),
   motors: joints.map((j) => adaptMotors(j)), free: raw.map((j) => adaptMotors(j, false)),
   directMotors: direct.map((j) => adaptMotors(j)), directFree: directRaw.map((j) => adaptMotors(j, false)),
   shapes: raw.map(adaptPositions),
@@ -704,7 +859,13 @@ process.stdout.write(JSON.stringify({{
     out = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True, check=True).stdout)
 
     assert np.allclose(out["coupling"], adapt.COUPLING)
+    assert out["defaults"]["names"] == list(adapt.JOINTS)
+    assert out["defaults"]["follows"] == {j: list(names) for j, names in adapt.FOLLOWS.items()}
+    assert out["defaults"]["calibration"] == {j: adapt._rows(p) for j, p in adapt._DEFAULT_CALIBRATION.items()}
     for k, hand in enumerate(hands):
+        yours = adapt.your_angles(hand)
+        assert out["yours"][k].keys() == yours.keys()
+        assert np.allclose([out["yours"][k][n] for n in yours], list(yours.values()), atol=1e-9)
         # the fit: the same solver, so the same pose (to its rounding)
         assert np.allclose(out["joints"][k], adapt.joint_angles(hand), atol=1e-9)
         assert np.allclose(out["raw"][k], adapt.joint_angles(hand, clip=False), atol=1e-9)

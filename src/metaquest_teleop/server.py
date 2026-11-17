@@ -99,6 +99,9 @@ class QuestHands:
         The USB link's status, as the dashboard shows it.
     events : collections.deque
         The last six ``(time.time(), text)`` status events.
+    calibration : pathlib.Path or None
+        Where the 3D view saves the ADAPT calibration you make in it (``metaquest-teleop
+        --calibration`` sets it); None, the default: the 3D view does not calibrate.
     """
 
     def __init__(self, port: int = DEFAULT_PORT, adb: bool = True,
@@ -117,6 +120,7 @@ class QuestHands:
         self._callbacks: list[Callable[[Frame], None]] = []
         self._raw_callbacks: list[Callable[[Frame], None]] = []
         self.teleop = None  # a Teleop, once one drives a robot from this stream
+        self.calibration: Path | None = None
         self._arrivals: collections.deque[tuple[float, bool]] = collections.deque(maxlen=2048)
         self._last_hands = b""
         self._clients: set[web.WebSocketResponse] = set()
@@ -242,6 +246,7 @@ class QuestHands:
         app.router.add_get("/ws", self._socket)
         app.router.add_get("/view", self._view_page)
         app.router.add_get("/view/ws", self._view_socket)
+        app.router.add_post("/calibration", self._calibrate)
         self._runner = web.AppRunner(app, access_log=None)
         await self._runner.setup()
         await web.TCPSite(self._runner, self.host, self.port).start()
@@ -312,18 +317,45 @@ class QuestHands:
             return  # the view closed while a message was on its way
 
     @staticmethod
-    def _human_ranges() -> list:
-        """adapt.HUMAN_RANGES as they are now, in the ADAPT joints' order, for the 3D view."""
+    def _calibration() -> dict:
+        """adapt.CALIBRATION as it is now, as rows [your angle(s)..., its angle] per joint, for the 3D view."""
         from . import adapt  # noqa: PLC0415 -- adapt imports this module, through fake
 
-        return [[float(v) for v in adapt.HUMAN_RANGES.get(j, (0, 0))] for j in adapt.JOINTS]
+        return {joint: adapt._rows(points) for joint, points in list(adapt.CALIBRATION.items())}
 
     @staticmethod
-    def _cmc2_poses() -> list:
-        """adapt.CMC2_POSES as they are now, as [base, spread, CMC2] rows: the ADAPT thumb's CMC2 from yours."""
+    def _follows() -> dict:
+        """adapt.FOLLOWS: the angles of yours that each ADAPT joint follows, for the 3D view."""
         from . import adapt  # noqa: PLC0415 -- adapt imports this module, through fake
 
-        return [[float(base), float(spread), float(v)] for (base, spread), v in adapt.CMC2_POSES.items()]
+        return {joint: list(names) for joint, names in adapt.FOLLOWS.items()}
+
+    async def _calibrate(self, request: web.Request) -> web.Response:
+        """From the 3D view, while calibrating: ``{"joint": name, "points": rows}`` gives a joint
+        these points, ``{"joint": name}`` its default ones; then all go to :attr:`calibration`."""
+        from . import adapt  # noqa: PLC0415 -- adapt imports this module, through fake
+
+        if self.calibration is None:
+            raise web.HTTPNotFound(text="not calibrating: start metaquest-teleop --calibration")
+        if request.content_type != "application/json":  # also keeps other web pages out (CORS)
+            raise web.HTTPUnsupportedMediaType(text="expected JSON")
+        try:
+            body = await request.json()
+            joint = body["joint"]
+            if not adapt.FOLLOWS.get(joint):
+                raise ValueError(f"{joint!r} is not an ADAPT joint that follows yours")
+            if body.get("points") is None:
+                adapt.reset_calibration(joint)
+            else:
+                adapt.CALIBRATION[joint] = adapt._points(joint, body["points"])
+        except (ValueError, KeyError, TypeError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        try:
+            adapt.save_calibration(self.calibration)
+        except OSError as exc:
+            return web.json_response({"error": f"not saved to {self.calibration}: {exc}"}, status=500)
+        self._event(f"calibration: {joint} saved")
+        return web.json_response({"calibration": self._calibration()})
 
     @staticmethod
     def _adapt_fit() -> bool:
@@ -340,8 +372,8 @@ class QuestHands:
                 "hands": self.hands,
                 "teleop": None if self.teleop is None else self.teleop.command().reason or "moving",
                 "adapt": None if self.teleop is None else self.teleop.adapt,
-                "human_ranges": self._human_ranges(), "adapt_fit": self._adapt_fit(),
-                "cmc2_poses": self._cmc2_poses(),
+                "adapt_fit": self._adapt_fit(), "calibration": self._calibration(), "follows": self._follows(),
+                "calibrating": None if self.calibration is None else str(self.calibration),
                 **{key: self.headset.get(key) for key in ("session", "mode", "fps", "space")}}
 
     # -- frames from the headset ------------------------------------------------------------- #

@@ -6,9 +6,9 @@
     motors = adapt.motor_angles(hand)  # (13,) rad, in MOTORS order: targets for a motor PID
     wrist = adapt.wrist_pose(hand)     # the wrist, with the ADAPT base frame's axes
 
-Its joints take the pose, within its limits, that puts the ADAPT hand closest to yours, through
-its forward kinematics (:func:`joint_angles`); or, with :data:`FIT` False, follow yours joint for
-joint (:data:`HUMAN_RANGES`).
+Its thumb follows yours through your calibration (:data:`CALIBRATION`), and its fingers take the
+pose, within its limits, that puts them closest to yours, through its forward kinematics
+(:func:`joint_angles`); with :data:`FIT` False, its fingers follow your calibration too.
 
 The ADAPT hand is a right hand: a thumb with joints CMC1, CMC2, MCP and IP, and four fingers with
 joints spread, MCP, PIP and DIP. Its geometry, joint ranges, motor order and transmissions are
@@ -22,10 +22,14 @@ with its base at :func:`wrist_pose`.
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+
 import numpy as np
 
 from .fake import quaternion
-from .hands import Hand, Pose
+from .hands import FINGERS, Hand, Pose
 
 #: The ADAPT hand's 20 joints, in the order of :func:`joint_angles`.
 JOINTS = (
@@ -62,28 +66,52 @@ JOINT_LIMITS = {
     "pinky_spread": (0.0, 0.3), "pinky_MCP": (0.0, 1.5), "pinky_PIP": (0.0, 1.2), "pinky_DIP": (0.0, 1.2),
 }  # fmt: skip
 
-#: Your range of motion for each ADAPT joint, in degrees: the angles of yours that give the low
-#: and the high end of its range (:data:`JOINT_LIMITS`); linearly in between, held at the ends
-#: beyond. Each ADAPT joint follows the same joint of yours, as your hand's range stretched onto
-#: the robot's. Typical ranges, set so that an open hand gives all zeros (the hand's home), a
-#: power grasp about PC1 and a pinch about PC2 of HumanManipulationVMC's PoseControl (Santello
-#: et al., 1998): change them to fit your hand, at any time. A spread is yours towards the thumb (so the index
-#: goes the other way round), the thumb's CMC1 is read as the ADAPT's is built (see
-#: :func:`joint_angles`). The thumb's CMC2 is not here: :data:`CMC2_POSES`.
-HUMAN_RANGES = {
-    "thumb_CMC1": (5, 95), "thumb_MCP": (0, 65), "thumb_IP": (0, 45),
-    "index_spread": (20, 0), "index_MCP": (0, 90), "index_PIP": (0, 90), "index_DIP": (0, 60),
-    "middle_spread": (0, 0), "middle_MCP": (0, 90), "middle_PIP": (0, 90), "middle_DIP": (0, 60),
-    "ring_spread": (0, -15), "ring_MCP": (0, 90), "ring_PIP": (0, 90), "ring_DIP": (0, 60),
-    "pinky_spread": (0, -25), "pinky_MCP": (0, 90), "pinky_PIP": (0, 90), "pinky_DIP": (0, 60),
+_COLUMNS = ("base", "spread", "middle", "tip")
+
+#: Your angles that the ADAPT joints follow, as the dashboard and the 3D view show them: each
+#: finger's ``base``, ``spread``, ``middle`` and ``tip`` (the thumb's too: :attr:`Hand.angles
+#: <metaquest_teleop.Hand.angles>`), and the thumb's ``turn``: how far its first bone has turned
+#: about the hand's long axis, from sideways towards the palm's front, as the ADAPT's CMC1 turns
+#: its own. :func:`your_angles` reads them, in degrees.
+YOUR_ANGLES = tuple(f"{finger} {column}" for finger in FINGERS for column in _COLUMNS) + ("thumb turn",)
+
+#: The angles of yours (:data:`YOUR_ANGLES`) that each ADAPT joint follows: the thumb's CMC2 two,
+#: its base and its spread; the middle finger's spread none (it stays at 0); the others one.
+FOLLOWS = {
+    "thumb_CMC1": ("thumb turn",), "thumb_CMC2": ("thumb base", "thumb spread"),
+    "thumb_MCP": ("thumb middle",), "thumb_IP": ("thumb tip",),
+    "index_spread": ("index spread",), "index_MCP": ("index base",), "index_PIP": ("index middle",), "index_DIP": ("index tip",),
+    "middle_spread": (), "middle_MCP": ("middle base",), "middle_PIP": ("middle middle",), "middle_DIP": ("middle tip",),
+    "ring_spread": ("ring spread",), "ring_MCP": ("ring base",), "ring_PIP": ("ring middle",), "ring_DIP": ("ring tip",),
+    "pinky_spread": ("pinky spread",), "pinky_MCP": ("pinky base",), "pinky_PIP": ("pinky middle",), "pinky_DIP": ("pinky tip",),
 }  # fmt: skip
 
-#: The ADAPT thumb's CMC2, in degrees, for poses of your thumb: (base, spread) -> CMC2, your
-#: thumb's base and spread in degrees as the dashboard shows them (the thumb's row of
-#: :attr:`Hand.angles <metaquest_teleop.Hand.angles>`). CMC2 follows the smoothest surface through
-#: them (:func:`cmc2`): exactly each pose's, and with three poses the plane through them. At least
-#: three, not on one line. Change, add or remove poses at any time.
-CMC2_POSES = {(20, 35): 0, (70, 20): -60, (0, 30): 20}
+#: The calibration: for each ADAPT joint, points of yours and the angle it takes there, in
+#: degrees: ``{your angle: its angle}``; for the thumb's CMC2, ``{(your base, your spread): its
+#: angle}`` (:data:`FOLLOWS`). Each joint goes through every point of its own: for one angle of
+#: yours, straight from one point to the next, and on in a straight line beyond the first and the
+#: last; for two, the smoothest surface through them (a thin-plate spline: with three points, the
+#: plane through them). Then within its limits (:data:`JOINT_LIMITS`). At least two points (for
+#: two angles, three not on one line).
+#:
+#: Change it at any time, in Python or in the 3D view (``metaquest-teleop --calibration``), which
+#: saves it (:func:`save_calibration`) for the next time (:func:`load_calibration`). The defaults:
+#: your open hand gives all zeros (the hand's home), a power grasp about PC1 and a pinch about PC2
+#: of HumanManipulationVMC's PoseControl (Santello et al., 1998).
+CALIBRATION = {
+    "thumb_CMC1": {5: 0, 95: 86}, "thumb_CMC2": {(20, 35): 0, (70, 20): -60, (0, 30): 20},
+    "thumb_MCP": {0: 0, 65: 86}, "thumb_IP": {0: 0, 45: 90},
+    "index_spread": {20: -17, 0: 0}, "index_MCP": {0: 0, 90: 86}, "index_PIP": {0: 0, 90: 69}, "index_DIP": {0: 0, 60: 69},
+    "middle_MCP": {0: 0, 90: 86}, "middle_PIP": {0: 0, 90: 69}, "middle_DIP": {0: 0, 60: 69},
+    "ring_spread": {0: 0, -15: 17}, "ring_MCP": {0: 0, 90: 86}, "ring_PIP": {0: 0, 90: 69}, "ring_DIP": {0: 0, 60: 69},
+    "pinky_spread": {0: 0, -25: 17}, "pinky_MCP": {0: 0, 90: 86}, "pinky_PIP": {0: 0, 90: 69}, "pinky_DIP": {0: 0, 60: 69},
+}  # fmt: skip
+_DEFAULT_CALIBRATION = {joint: dict(points) for joint, points in CALIBRATION.items()}
+
+#: Where ``metaquest-teleop`` keeps your calibration, and :func:`load_calibration` and
+#: :func:`save_calibration` by default: ``~/.config/metaquest-teleop/adapt_calibration.json``
+#: (``$XDG_CONFIG_HOME`` instead of ``~/.config`` when set).
+CALIBRATION_FILE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "metaquest-teleop" / "adapt_calibration.json"
 
 
 def _spline(r: np.ndarray) -> np.ndarray:
@@ -91,25 +119,134 @@ def _spline(r: np.ndarray) -> np.ndarray:
     return np.where(r > 0.0, r * r * np.log(np.where(r > 0.0, r, 1.0)), 0.0)
 
 
-def _cmc2_surface() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """The thin-plate spline through CMC2_POSES: the poses (n, 2), their weights (n,) and the
-    plane's (a, b, c)."""
-    poses = np.array(list(CMC2_POSES), dtype=float).reshape(-1, 2)
-    values = np.array(list(CMC2_POSES.values()), dtype=float)
-    n = len(poses)
-    plane = np.c_[np.ones(n), poses]
-    system = np.block([[_spline(np.linalg.norm(poses[:, None] - poses[None], axis=-1)), plane],
-                       [plane.T, np.zeros((3, 3))]])
-    solved = np.linalg.solve(system, np.r_[values, np.zeros(3)])
-    return poses, solved[:n], solved[n:]
+def _model(joint: str, points: dict) -> tuple:
+    """How a joint follows yours through its points: for one angle of yours, the points sorted
+    (yours, its); for more, the thin-plate spline (yours (n, k), weights (n,), plane (k + 1,)).
+    ValueError if the points cannot make one."""
+    k = len(FOLLOWS[joint])
+    names = ", ".join(FOLLOWS[joint])
+    if k == 0:
+        raise ValueError(f"{joint} follows none of your angles: it has no calibration")
+    yours, its = [], []
+    for key, value in points.items():
+        x = np.atleast_1d(np.asarray(key, dtype=float))
+        if x.shape != (k,) or not np.all(np.isfinite(x)) or not np.isfinite(float(value)):
+            raise ValueError(f"{joint}: a point is {k} angle(s) of yours ({names}) and its angle, in degrees, not {key!r}: {value!r}")
+        yours.append(x)
+        its.append(float(value))
+    yours, its = np.array(yours, dtype=float).reshape(-1, k), np.array(its)
+    if k == 1:
+        order = np.argsort(yours[:, 0], kind="stable")
+        x, y = yours[order, 0], its[order]
+        if len(x) < 2 or np.any(np.diff(x) == 0):
+            raise ValueError(f"{joint} needs two points or more, at different angles of yours ({names})")
+        return x, y
+    n = len(yours)
+    plane = np.c_[np.ones(n), yours]
+    if n < k + 1 or np.linalg.matrix_rank(plane) < k + 1:
+        raise ValueError(f"{joint} needs {k + 1} points or more, not all on one line ({names})")
+    system = np.block([[_spline(np.linalg.norm(yours[:, None] - yours[None], axis=-1)), plane],
+                       [plane.T, np.zeros((k + 1, k + 1))]])
+    try:
+        solved = np.linalg.solve(system, np.r_[its, np.zeros(k + 1)])
+    except np.linalg.LinAlgError:
+        raise ValueError(f"{joint}: two of its points are at the same angles of yours ({names})") from None
+    return yours, solved[:n], solved[n:]
 
 
-def cmc2(base: float, spread: float) -> float:
-    """The ADAPT thumb's CMC2, degrees, for your thumb's base and spread, degrees: the smoothest
-    surface through :data:`CMC2_POSES` (a thin-plate spline: a plane, bent just enough to pass
-    through every pose), before the joint's limits."""
-    poses, weights, (a, b, c) = _cmc2_surface()
-    return float(a + b * base + c * spread + weights @ _spline(np.hypot(base - poses[:, 0], spread - poses[:, 1])))
+_MODELS: dict = {}  # joint -> (its points, as items, when solved; its model)
+
+
+def calibrated(joint: str, *yours: float) -> float:
+    """The angle of the ADAPT joint, in degrees, for these angles of yours, in degrees (its
+    :data:`FOLLOWS`, in that order), through its :data:`CALIBRATION` points; before its limits.
+    ``calibrated("thumb_CMC2", 20, 35)`` is the CMC2 for your thumb's base at 20° and spread at 35°."""
+    if len(yours) != len(FOLLOWS[joint]):
+        raise TypeError(f"{joint} follows {len(FOLLOWS[joint])} angle(s) of yours ({', '.join(FOLLOWS[joint])}), not {len(yours)}")
+    if not yours:
+        return 0.0
+    points = CALIBRATION[joint]
+    items = tuple(points.items())
+    cached = _MODELS.get(joint)
+    if cached is None or cached[0] != items:
+        cached = _MODELS[joint] = (items, _model(joint, points))
+    model = cached[1]
+    if len(model) == 2:  # one angle of yours: straight from point to point, and on beyond the ends
+        x, y = model
+        v = float(yours[0])
+        i = int(min(max(np.searchsorted(x, v, side="right") - 1, 0), len(x) - 2))
+        return float(y[i] + (v - x[i]) * (y[i + 1] - y[i]) / (x[i + 1] - x[i]))
+    points_at, weights, plane = model
+    v = np.asarray(yours, dtype=float)
+    return float(plane[0] + plane[1:] @ v + weights @ _spline(np.linalg.norm(points_at - v, axis=1)))
+
+
+def _points(joint: str, rows) -> dict:
+    """A joint's points from rows ``[[your angle(s)..., its angle], ...]``, checked."""
+    k = len(FOLLOWS.get(joint, ()))
+    if k == 0:
+        raise ValueError(f"{joint!r} is not an ADAPT joint that follows yours (adapt.FOLLOWS)")
+    ok = isinstance(rows, list) and all(
+        isinstance(row, list) and len(row) == k + 1
+        and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in row) for row in rows)
+    if not ok:
+        raise ValueError(f"{joint}: expected points [[{', '.join(FOLLOWS[joint])}, its angle], ...] in degrees")
+    points = dict(sorted({(row[0] if k == 1 else tuple(row[:k])): row[k] for row in rows}.items()))
+    _model(joint, points)  # ValueError if it cannot follow them
+    return points
+
+
+def _number(v):
+    v = float(v)
+    return int(v) if v.is_integer() else v
+
+
+def _rows(points: dict) -> list:
+    """A joint's points as rows ``[[your angle(s)..., its angle], ...]``."""
+    return [[*(_number(x) for x in np.atleast_1d(key)), _number(value)] for key, value in points.items()]
+
+
+def load_calibration(path: str | os.PathLike | None = None) -> bool:
+    """Load a calibration saved by :func:`save_calibration`, from :data:`CALIBRATION_FILE` (where
+    ``metaquest-teleop --calibration`` saves yours) unless ``path``: its joints take its points,
+    the others the defaults. False, and nothing changes, if there is no such file; ValueError if it
+    is not a calibration."""
+    path = Path(CALIBRATION_FILE if path is None else path)
+    if not path.is_file():
+        return False
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(saved, dict):
+            raise ValueError("expected {joint: points, ...}")
+        loaded = {joint: _points(joint, rows) for joint, rows in saved.items()}
+    except ValueError as exc:
+        raise ValueError(f"{path} is not an ADAPT calibration: {exc}") from None
+    reset_calibration()
+    CALIBRATION.update(loaded)
+    return True
+
+
+def save_calibration(path: str | os.PathLike | None = None) -> Path:
+    """Save the joints whose points are not the defaults, to :data:`CALIBRATION_FILE` unless
+    ``path``, for :func:`load_calibration`. As JSON: ``{"thumb_IP": [[0, 0], [45, 90]], ...}``, each
+    point your angle(s) then its angle, in degrees. Returns where it saved."""
+    path = Path(CALIBRATION_FILE if path is None else path)
+    lines = [f"  {json.dumps(joint)}: {json.dumps(_rows(points))}" for joint, points in CALIBRATION.items()
+             if points != _DEFAULT_CALIBRATION.get(joint)]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text("{\n" + ",\n".join(lines) + "\n}\n" if lines else "{}\n", encoding="utf-8")
+    os.replace(partial, path)
+    return path
+
+
+def reset_calibration(joint: str | None = None) -> None:
+    """Back to the default calibration: of every joint, or of ``joint``."""
+    for name in _DEFAULT_CALIBRATION if joint is None else (joint,):
+        CALIBRATION[name] = dict(_DEFAULT_CALIBRATION[name])
+    if joint is None:
+        for extra in set(CALIBRATION) - set(_DEFAULT_CALIBRATION):
+            del CALIBRATION[extra]
 
 
 DIGITS = ("thumb", "index", "middle", "ring", "pinky")
@@ -227,31 +364,26 @@ def _rotation(axis, angle: float) -> np.ndarray:
                      [z * x * t - y * s, z * y * t + x * s, c + z * z * t]])
 
 
-def _yours(hand: Hand) -> np.ndarray:
-    """(20,) your angle at each ADAPT joint, radians, measured as the ADAPT's is."""
-    a = hand.angles
-    # Your thumb's first bone, in the ADAPT axes, read as the ADAPT's CMC joints turn theirs: CMC2
-    # swings it from sideways towards the fingers, then CMC1 turns it about the hand's long axis,
-    # from sideways towards the palm's front.
+def your_angles(hand: Hand) -> dict[str, float]:
+    """Your angles that the ADAPT joints follow (:data:`YOUR_ANGLES`), in degrees, by name."""
+    a = np.degrees(hand.angles)
+    out = {f"{finger} {column}": float(a[f, c]) for f, finger in enumerate(FINGERS) for c, column in enumerate(_COLUMNS)}
+    # Your thumb's first bone, in the ADAPT axes, read as the ADAPT's CMC1 turns its own: about the
+    # hand's long axis, from sideways towards the palm's front.
     d = _FROM_WEBXR @ (hand.rotations[0].T @ (hand.positions[2] - hand.positions[1]))
-    d = d / np.linalg.norm(d)
-    out = [np.arctan2(d[1], -d[0]), np.arcsin(np.clip(d[2], -1.0, 1.0)), a[0, 2], a[0, 3]]
-    for f in range(1, 5):
-        out += [a[f, 1], a[f, 0], a[f, 2], a[f, 3]]
-    return np.array(out)
+    out["thumb turn"] = float(np.degrees(np.arctan2(d[1], -d[0])))
+    return out
 
 
 def _wanted(hand: Hand) -> np.ndarray:
-    """(20,) your range stretched onto the ADAPT's, joint by joint (:data:`HUMAN_RANGES`); the
-    thumb's CMC2 from your thumb's base and spread (:data:`CMC2_POSES`)."""
-    yours = _yours(hand)
-    low, high = np.radians(np.array([HUMAN_RANGES.get(j, (0, 0)) for j in JOINTS], dtype=float)).T  # as they are now
-    span = high - low
-    share = np.divide(yours - low, span, out=np.zeros(20), where=span != 0.0)
-    wanted = _LOW + share * (_HIGH - _LOW)
-    base, spread = np.degrees(hand.angles[0, :2])
-    wanted[1] = np.radians(cmc2(base, spread))
-    return wanted
+    """(20,) each ADAPT joint through its calibration (:data:`CALIBRATION`), radians, before its limits."""
+    yours = your_angles(hand)
+    return np.radians([calibrated(j, *(yours[name] for name in FOLLOWS[j])) for j in JOINTS])
+
+
+def _calibration_key() -> tuple:
+    """The calibration as it is now, to know when it changed."""
+    return tuple((FOLLOWS[j], tuple(CALIBRATION[j].items()) if j in CALIBRATION else ()) for j in JOINTS)
 
 
 def _fit(joints: np.ndarray, clip: bool) -> np.ndarray:
@@ -376,11 +508,11 @@ def _solve(hand: Hand, clip: bool) -> np.ndarray:
     return m
 
 
-_LAST: dict = {}  # clip -> (hand, your ranges and CMC2 poses, motors): the last fit, for the next caller of that frame
+_LAST: dict = {}  # clip -> (hand, the calibration, motors): the last fit, for the next caller of that frame
 
 
 def _fitted(hand: Hand, clip: bool) -> np.ndarray:
-    ranges = (tuple(tuple(v) for v in HUMAN_RANGES.values()), tuple(CMC2_POSES.items()))
+    ranges = _calibration_key()
     last = _LAST.get(clip)
     if last is not None and last[0] is hand and last[1] == ranges:
         return last[2].copy()
@@ -392,8 +524,8 @@ def _fitted(hand: Hand, clip: bool) -> np.ndarray:
 def joint_angles(hand: Hand, clip: bool = True, coupled: bool = True, fit: bool | None = None) -> np.ndarray:
     """(20,) the ADAPT joint angles for your hand, radians, in :data:`JOINTS` order: a pose it can take.
 
-    The thumb always follows yours joint for joint (below): its CMC1, MCP and IP through
-    :data:`HUMAN_RANGES`, its CMC2 from your thumb's base and spread through :data:`CMC2_POSES`.
+    The thumb always follows your calibration (:data:`CALIBRATION`): each of its joints the angles
+    of yours it follows (:data:`FOLLOWS`), through your points.
 
     The fit (``fit=True``, the default: :data:`FIT`): the fingers' pose that puts the ADAPT hand
     closest to yours, through its forward kinematics, around that thumb. Your knuckles on its
@@ -401,14 +533,11 @@ def joint_angles(hand: Hand, clip: bool = True, coupled: bool = True, fit: bool 
     near the thumb tip as yours is, when you pinch. Only poses the hand can take: its motors
     (:data:`COUPLING`), within :data:`JOINT_LIMITS` (``clip=False``: without them).
 
-    Joint for joint (``fit=False``): each ADAPT joint follows the same joint of yours, your range
-    of motion stretched onto its range (:data:`HUMAN_RANGES`). A finger's spread, MCP, PIP and DIP
-    follow yours; the thumb's MCP and IP follow yours, and its CMC1 is read off your thumb's first
-    bone as the ADAPT's is built: how far it has turned about the hand's long axis, from sideways
-    towards the palm's front.
-    Then the pose the hand can take, as in ``virtualmodelcontrol``: a finger's DIP mimics its PIP
-    (both the mean of the two), and one motor spreads the fingers (the best fit of the three). The
-    fit starts from this pose.
+    Joint for joint (``fit=False``): every joint follows your calibration, the fingers' too: a
+    finger's spread, MCP, PIP and DIP follow your spread, base, middle and tip. Then the pose the
+    hand can take, as in ``virtualmodelcontrol``: a finger's DIP mimics its PIP (both the mean of
+    the two), and one motor spreads the fingers (the best fit of the three). The fit starts from
+    this pose.
 
     ``coupled=False`` gives the joint-for-joint angles before the motors, joint by joint (with or
     without ``fit``). ``clip`` keeps every joint within :data:`JOINT_LIMITS`.
