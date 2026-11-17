@@ -476,7 +476,7 @@ def test_the_calibration_is_saved_and_loaded(tmp_path):
     adapt.CALIBRATION["thumb_IP"] = {0: 0, 20: 30, 45: 90}
     adapt.CALIBRATION["thumb_CMC2"][(45, 25)] = -20
     assert adapt.save_calibration(path) == path
-    saved = json.loads(path.read_text())  # all of it, in degrees
+    saved = json.loads(path.read_text(encoding="utf-8"))  # all of it, in degrees
     assert saved == {joint: adapt._rows(points) for joint, points in adapt.CALIBRATION.items()}
     assert saved["thumb_IP"] == [[0, 0], [20, 30], [45, 90]] and [45, 25, -20] in saved["thumb_CMC2"]
     hand = synthetic_hand("right", np.array([[0.8, 0.4, 0.3, np.radians(20)]] + [[0.4, 0.0, 0.5, 0.3]] * 4), _pose(np.random.default_rng(4)))
@@ -490,7 +490,7 @@ def test_the_calibration_is_saved_and_loaded(tmp_path):
     adapt.reset_calibration("index_MCP")  # one joint back to the library's points
     assert adapt.CALIBRATION["index_MCP"] == adapt._DEFAULT_CALIBRATION["index_MCP"]
     assert adapt.CALIBRATION["thumb_IP"] == {0: 0, 20: 30, 45: 90}
-    path.write_text('{"thumb_IP": [[0, 0], [30, 90]]}')  # a file with some joints: the others are the library's
+    path.write_text('{"thumb_IP": [[0, 0], [30, 90]]}', encoding="utf-8")  # a file with some joints: the others are the library's
     adapt.load_calibration(path)
     assert adapt.CALIBRATION == {**adapt._DEFAULT_CALIBRATION, "thumb_IP": {0: 0, 30: 90}}
     # No file, or not a calibration: refused, and nothing changes.
@@ -498,7 +498,7 @@ def test_the_calibration_is_saved_and_loaded(tmp_path):
         adapt.load_calibration(tmp_path / "none.json")
     for bad in ("nope", "[1, 2]", '{"thumb_IP": [[0, 0]]}', '{"thumb_IP": [[0, 0, 1], [1, 2, 3]]}',
                 '{"wrist": [[0, 0], [1, 1]]}', '{"middle_spread": [[0, 0], [1, 1]]}', '{"thumb_IP": [[0, true], [1, 2]]}'):
-        path.write_text(bad)
+        path.write_text(bad, encoding="utf-8")
         with pytest.raises(ValueError, match="not an ADAPT calibration"):
             adapt.load_calibration(path)
         assert adapt.CALIBRATION["thumb_IP"] == {0: 0, 30: 90}
@@ -519,13 +519,13 @@ def test_a_calibration_becomes_the_librarys_with_its_script(tmp_path):
     run = lambda path: subprocess.run([sys.executable, str(script), str(path), "--root", str(tmp_path / "repo")],  # noqa: E731
                                       capture_output=True, text=True)
     library = lambda: ast.literal_eval(  # noqa: E731
-        (package / "adapt.py").read_text().split("\nCALIBRATION = ")[1].split("  # fmt: skip")[0])
+        (package / "adapt.py").read_text(encoding="utf-8").split("\nCALIBRATION = ")[1].split("  # fmt: skip")[0])
 
     adapt.reset_calibration()  # the library's own: nothing changes
     adapt.save_calibration(tmp_path / "same.json")
-    before = {name: (package / name).read_text() for name in ("adapt.py", "view.html")}
+    before = {name: (package / name).read_text(encoding="utf-8") for name in ("adapt.py", "view.html")}
     assert run(tmp_path / "same.json").returncode == 0
-    assert {name: (package / name).read_text() for name in before} == before
+    assert {name: (package / name).read_text(encoding="utf-8") for name in before} == before
     ip = dict(adapt.CALIBRATION["thumb_IP"])  # yours, a point more: in the Python and in the 3D view
     ip[max(ip) + 7.25] = 77.5
     adapt.CALIBRATION["thumb_IP"] = ip
@@ -535,15 +535,15 @@ def test_a_calibration_becomes_the_librarys_with_its_script(tmp_path):
     assert done.returncode == 0 and "thumb_IP" in done.stdout and "thumb_CMC1" not in done.stdout
     assert library() == adapt.CALIBRATION
     if shutil.which("node") is not None:
-        html = (package / "view.html").read_text()
+        html = (package / "view.html").read_text(encoding="utf-8")
         page = tmp_path / "calibration.js"
         page.write_text(html.split("// math-begin")[1].split("// math-end")[0]
-                        + "process.stdout.write(JSON.stringify(ADAPT_CALIBRATION));")
+                        + "process.stdout.write(JSON.stringify(ADAPT_CALIBRATION));", encoding="utf-8")
         shown = json.loads(subprocess.run(["node", str(page)], capture_output=True, text=True, check=True).stdout)
         assert shown == {joint: adapt._rows(dict(sorted(points.items()))) for joint, points in adapt.CALIBRATION.items()}
-    (tmp_path / "bad.json").write_text('{"thumb_IP": [[0, 0]]}')  # not a calibration: nothing changes
-    before = (package / "adapt.py").read_text()
-    assert run(tmp_path / "bad.json").returncode == 1 and (package / "adapt.py").read_text() == before
+    (tmp_path / "bad.json").write_text('{"thumb_IP": [[0, 0]]}', encoding="utf-8")  # not a calibration: nothing changes
+    before = (package / "adapt.py").read_text(encoding="utf-8")
+    assert run(tmp_path / "bad.json").returncode == 1 and (package / "adapt.py").read_text(encoding="utf-8") == before
 
 
 def test_the_3d_view_calibrates_only_with_metaquest_teleop_calibration(tmp_path):
@@ -568,7 +568,7 @@ def test_the_3d_view_calibrates_only_with_metaquest_teleop_calibration(tmp_path)
         status, answer = asyncio.run(post(port, {"joint": "thumb_IP", "points": [[30, 90], [0, 0]]}))
         assert status == 200 and answer["calibration"]["thumb_IP"] == [[0, 0], [30, 90]]  # in order
         assert adapt.CALIBRATION["thumb_IP"] == {0: 0, 30: 90}
-        assert json.loads(path.read_text())["thumb_IP"] == [[0, 0], [30, 90]]  # all of it, at every point
+        assert json.loads(path.read_text(encoding="utf-8"))["thumb_IP"] == [[0, 0], [30, 90]]  # all of it, at every point
         for bad in ({"joint": "thumb_IP", "points": [[0, 0]]}, {"joint": "middle_spread", "points": [[0, 0], [1, 1]]},
                     {"joint": "nope"}, {"points": []}, [1]):
             status, answer = asyncio.run(post(port, bad))
@@ -578,7 +578,7 @@ def test_the_3d_view_calibrates_only_with_metaquest_teleop_calibration(tmp_path)
         assert status == 415  # not JSON: another web page cannot send it
         status, answer = asyncio.run(post(port, {"joint": "thumb_IP"}))  # back to the library's points
         assert status == 200 and adapt.CALIBRATION["thumb_IP"] == adapt._DEFAULT_CALIBRATION["thumb_IP"]
-        assert json.loads(path.read_text())["thumb_IP"] == adapt._rows(adapt._DEFAULT_CALIBRATION["thumb_IP"])
+        assert json.loads(path.read_text(encoding="utf-8"))["thumb_IP"] == adapt._rows(adapt._DEFAULT_CALIBRATION["thumb_IP"])
 
 
 def test_the_command_line_loads_a_calibration_only_when_asked(tmp_path, monkeypatch, capsys):
@@ -595,7 +595,7 @@ def test_the_command_line_loads_a_calibration_only_when_asked(tmp_path, monkeypa
         with pytest.raises(SystemExit):
             run(*args)
     bad = tmp_path / "bad.json"
-    bad.write_text("[]")
+    bad.write_text("[]", encoding="utf-8")
     assert run("--calibration-file", str(bad), "--no-adb", "--no-ros") == 1
     assert "not an ADAPT calibration" in capsys.readouterr().out
     assert run("--calibration-file", str(tmp_path / "none.json"), "--no-adb", "--no-ros") == 1
