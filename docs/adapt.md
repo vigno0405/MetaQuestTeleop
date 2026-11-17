@@ -5,9 +5,9 @@ hide-toc: true
 # ADAPT Hand
 
 `metaquest_teleop.adapt` turns your hand into the ADAPT hand's 20 joint angles and 13 motor
-angles: the pose, within the robot's limits, that puts the ADAPT hand closest to yours. It also
-gives the pose of your wrist. Its geometry, joint ranges and motor order are those of
-`virtualmodelcontrol.robots.adapt`.
+angles, within the robot's limits: its thumb follows yours through a calibration you can make
+your own, and its fingers take the pose closest to yours. It also gives the pose of your wrist.
+Its geometry, joint ranges and motor order are those of `virtualmodelcontrol.robots.adapt`.
 
 ## Try it
 
@@ -119,9 +119,9 @@ release: `pip install -U metaquest-teleop` brings it to every computer.
 }
 ```
 
-One line per joint (here the thumb's; the fingers' follow); each point is your angle (for CMC2 your base and spread), then the ADAPT
-joint's, in degrees. You can edit it by hand. A file with only some joints gives the others the
-library's points.
+One line per joint (here the thumb's; the fingers' follow); each point is your angle (for CMC2,
+your base and spread), then the ADAPT joint's, in degrees. You can edit it by hand. A file with
+only some joints gives the others the library's points.
 
 ### In Python
 
@@ -160,10 +160,9 @@ joint-for-joint pose (below), takes a few milliseconds, and pulls very slightly 
 pose, which picks one pose when several fit as well. Fingers shaped exactly as an ADAPT pose get
 that pose back.
 
-The thumb is not fitted because the two thumbs differ too much to match their shapes: fitting
-it bent the ADAPT's MCP to its limit in most grasps, whatever yours did. The catch is pinches:
-unless the calibration turns CMC2 towards the fingers when you pinch, the ADAPT's thumb tip
-stays short of the fingertip.
+The thumb is not fitted: the two thumbs differ too much for their shapes to match, so it
+follows the calibration instead. In a pinch, the ADAPT's thumb tip reaches the index tip only
+with CMC1 above about 60° and CMC2 above about 0°; elsewhere it stays short of it.
 
 ## Joints: the calibration
 
@@ -190,12 +189,12 @@ Each joint takes the straight line closest to its points (with **two angles of y
 thumb's CMC2, the plane), by least squares: through them with two points (three for CMC2),
 their best fit with more. Always within the joint's range.
 
-The library's first points were typical ranges, set so that, as with the real hand's poses of
-HumanManipulationVMC (Santello et al., 1998): your **open hand gives home**, all zeros; a
-**power grasp gives PC1** (thumb CMC1 65°, MCP 50°; fingers 55° and 65°); a **pinch gives PC2**
-(thumb 50°, MCP 35°; index 25° and 40°); and the thumb's IP turned twice as far as yours. The
-thumb's CMC2 and IP have since been calibrated with `metaquest-teleop --calibration`. The 3D
-view of `metaquest-teleop` uses the same calibration, and fits or not as the library does.
+The library's points started as typical ranges, so that, as with the real hand's poses of
+HumanManipulationVMC (Santello et al., 1998), your **open hand gives home**, all zeros; a
+**power grasp gives PC1** (thumb CMC1 65°, MCP 50°; fingers 55° and 65°); and a **pinch gives
+PC2** (thumb 50°, MCP 35°; index 25° and 40°). Its thumb's CMC2 and IP come from a calibration
+made with `metaquest-teleop --calibration`. The 3D view of `metaquest-teleop` uses the same
+calibration, and fits or not as the library does.
 
 The ADAPT thumb's CMC joints are a gimbal: CMC2 swings its first bone from sideways towards the
 fingers, then CMC1 turns it about the hand's long axis towards the palm's front. Your thumb's

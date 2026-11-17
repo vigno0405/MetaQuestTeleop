@@ -317,18 +317,26 @@ class QuestHands:
             return  # the view closed while a message was on its way
 
     @staticmethod
-    def _calibration() -> dict:
-        """adapt.CALIBRATION as it is now, as rows [your angle(s)..., its angle] per joint, for the 3D view."""
+    def _adapt_status() -> dict:
+        """The ADAPT mapping as it is now, for the 3D view to map your hand as the library does:
+        whether it fits the fingers (adapt.FIT), the angles of yours each joint follows
+        (adapt.FOLLOWS) and the calibration (adapt.CALIBRATION), as rows [your angle(s)..., its angle]."""
         from . import adapt  # noqa: PLC0415 -- adapt imports this module, through fake
 
-        return {joint: adapt._rows(points) for joint, points in list(adapt.CALIBRATION.items())}
+        return {"adapt_fit": bool(adapt.FIT), "follows": {joint: list(names) for joint, names in adapt.FOLLOWS.items()},
+                "calibration": {joint: adapt._rows(points) for joint, points in list(adapt.CALIBRATION.items())}}
 
-    @staticmethod
-    def _follows() -> dict:
-        """adapt.FOLLOWS: the angles of yours that each ADAPT joint follows, for the 3D view."""
-        from . import adapt  # noqa: PLC0415 -- adapt imports this module, through fake
-
-        return {joint: list(names) for joint, names in adapt.FOLLOWS.items()}
+    def _view_status(self) -> dict:
+        rates = self.rates()
+        return {"page": self.connected, "url": self.url, "use_adb": self.use_adb,
+                "usb_ok": self.usb_ok, "usb": self.usb, "frames": self.frames,
+                "hz": rates["hz"], "changed_hz": rates["changed_hz"],
+                "hands": self.hands,
+                "teleop": None if self.teleop is None else self.teleop.command().reason or "moving",
+                "adapt": None if self.teleop is None else self.teleop.adapt,
+                **self._adapt_status(),
+                "calibrating": None if self.calibration is None else str(self.calibration),
+                **{key: self.headset.get(key) for key in ("session", "mode", "fps", "space")}}
 
     async def _calibrate(self, request: web.Request) -> web.Response:
         """From the 3D view, while calibrating: ``{"joint": name, "points": rows}`` gives a joint
@@ -355,26 +363,7 @@ class QuestHands:
         except OSError as exc:
             return web.json_response({"error": f"not saved to {self.calibration}: {exc}"}, status=500)
         self._event(f"calibration: {joint} saved")
-        return web.json_response({"calibration": self._calibration()})
-
-    @staticmethod
-    def _adapt_fit() -> bool:
-        """adapt.FIT as it is now: the 3D view fits the ADAPT hand to yours, or maps it joint for joint."""
-        from . import adapt  # noqa: PLC0415 -- adapt imports this module, through fake
-
-        return bool(adapt.FIT)
-
-    def _view_status(self) -> dict:
-        rates = self.rates()
-        return {"page": self.connected, "url": self.url, "use_adb": self.use_adb,
-                "usb_ok": self.usb_ok, "usb": self.usb, "frames": self.frames,
-                "hz": rates["hz"], "changed_hz": rates["changed_hz"],
-                "hands": self.hands,
-                "teleop": None if self.teleop is None else self.teleop.command().reason or "moving",
-                "adapt": None if self.teleop is None else self.teleop.adapt,
-                "adapt_fit": self._adapt_fit(), "calibration": self._calibration(), "follows": self._follows(),
-                "calibrating": None if self.calibration is None else str(self.calibration),
-                **{key: self.headset.get(key) for key in ("session", "mode", "fps", "space")}}
+        return web.json_response({"calibration": self._adapt_status()["calibration"]})
 
     # -- frames from the headset ------------------------------------------------------------- #
 

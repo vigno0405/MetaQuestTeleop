@@ -10,7 +10,7 @@
 | streaming without pressing Start | normal: the headset was still streaming from before, and its page reconnects by itself |
 | *WebXR is not available*, in the headset | open exactly `http://localhost:8012`, not the computer's address |
 | *This site can't provide a secure connection*, in the headset | type the address with `http://`: **http://localhost:8012** |
-| all black in the headset after Start | update: `pip install --upgrade metaquest-teleop` (fixed in 0.5.0) |
+| all black in the headset after Start | update: `pip install --upgrade metaquest-teleop` |
 | *Hand tracking is unavailable*, in the headset | turn hand tracking on and put the controllers down |
 | `Could not serve on port 8012` | another copy is running: stop it, or use `--port 8013` |
 

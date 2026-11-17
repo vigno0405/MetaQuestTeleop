@@ -714,16 +714,13 @@ def _adapt_shaped_hand(joints):
 
 
 def _distance_to(hand, joints):
-    """mm: how far the ADAPT hand is from yours, as the fit measures it: the fingers' PIP, DIP and
-    tips (your knuckles on the ADAPT's), and the thumb's shape from its base."""
+    """mm: how far the ADAPT fingers' PIP, DIP and tips are from yours, as the fit measures it
+    (your knuckles on the ADAPT's)."""
     from metaquest_teleop import adapt
 
     goal, _, _ = adapt._targets(hand)
     points, _ = adapt._chains(joints)
-    ours = points[:, 3:6].copy()
-    ours[0] -= points[0, 2]
-    gaps = np.linalg.norm(ours - goal, axis=-1) * 1000
-    return gaps[1:].mean(), gaps[0].mean()
+    return np.linalg.norm(points[1:, 3:6] - goal, axis=-1).mean() * 1000
 
 
 def test_the_fit_puts_the_adapt_hand_where_yours_is():
@@ -744,8 +741,7 @@ def test_the_fit_puts_the_adapt_hand_where_yours_is():
         got = adapt.joint_angles(hand)
         assert np.degrees(np.abs(got[4:] - joints[4:])).max() < 1.0
         assert np.allclose(got[:4], adapt.joint_angles(hand, fit=False)[:4], atol=1e-12)
-        fingers, _ = _distance_to(hand, got)
-        assert fingers < 0.5
+        assert _distance_to(hand, got) < 0.5
 
     # Your hand: the fit is nearer to it than joint for joint is, within the same limits, as
     # the fit measures it (it starts there, and each step it takes brings the hand nearer).

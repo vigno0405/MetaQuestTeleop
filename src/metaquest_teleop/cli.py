@@ -4,7 +4,7 @@
     metaquest-teleop --view                 # also open the 3D view of the hands in a browser
     metaquest-teleop --print_joints         # print your joint angles and the ADAPT hand's
     metaquest-teleop --no-adapt             # no ADAPT hand: no ADAPT topics, no ADAPT joints
-    metaquest-teleop --no-adapt-fit         # the ADAPT hand joint for joint, not fitted to yours
+    metaquest-teleop --no-adapt-fit         # the ADAPT fingers through the calibration, not fitted to yours
     metaquest-teleop --calibration          # calibrate the ADAPT hand in the 3D view, saved to a file
     metaquest-teleop --calibration-file F   # the ADAPT hand with that calibration, not the library's
     metaquest-teleop --no-ros               # not on ROS 2 (the default publishes when ROS is found)
@@ -127,7 +127,7 @@ def main() -> int:
     parser.add_argument("--no-adapt", action="store_true",
                         help="no ADAPT hand: no ADAPT topics or printed ADAPT joints; the teleoperation gives your own joint angles")
     parser.add_argument("--no-adapt-fit", action="store_true",
-                        help="the ADAPT fingers joint for joint, through your calibration, instead of fitted to yours")
+                        help="the ADAPT fingers through the calibration, joint for joint, instead of fitted to yours")
     parser.add_argument("--calibration", action="store_true",
                         help="calibrate the ADAPT hand in the 3D view, which opens; saved to a new file in "
                              f"{adapt.CALIBRATIONS}")
@@ -149,7 +149,6 @@ def main() -> int:
             return 1
     if not args.no_adapt:
         print("ADAPT calibration:", args.calibration_file or "the library's", flush=True)
-    session = adapt.CALIBRATIONS / f"adapt-{time.strftime('%Y-%m-%d-%H%M%S')}.json"
 
     try:
         quest = QuestHands(args.port, adb=not args.no_adb, udp=args.udp, hands=args.hands).start()
@@ -172,7 +171,8 @@ def main() -> int:
         else:
             through = f" through {ros.python}, the Python ROS 2 runs on" if ros.python else ""
             print(f"publishing on ROS 2{through}: /metaquest/... (ros2 topic list)", flush=True)
-    if args.calibration:
+    if args.calibration:  # a new file each time, named by when it started
+        session = adapt.CALIBRATIONS / f"adapt-{time.strftime('%Y-%m-%d-%H%M%S')}.json"
         quest.calibration = session
         print(f"Calibrate the ADAPT hand in the 3D view: {quest.view_url}?mode=adapt; "
               f"your points go to {session}", flush=True)

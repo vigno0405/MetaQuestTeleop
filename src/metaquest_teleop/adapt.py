@@ -6,18 +6,16 @@
     motors = adapt.motor_angles(hand)  # (13,) rad, in MOTORS order: targets for a motor PID
     wrist = adapt.wrist_pose(hand)     # the wrist, with the ADAPT base frame's axes
 
-Its thumb follows yours through your calibration (:data:`CALIBRATION`), and its fingers take the
-pose, within its limits, that puts them closest to yours, through its forward kinematics
-(:func:`joint_angles`); with :data:`FIT` False, its fingers follow your calibration too.
+Each ADAPT joint follows one or two angles of yours through a calibration (:data:`CALIBRATION`).
+The thumb always does; the fingers take the pose, around that thumb and within the hand's limits,
+that puts them closest to yours, through its forward kinematics (:data:`FIT`).
 
 The ADAPT hand is a right hand: a thumb with joints CMC1, CMC2, MCP and IP, and four fingers with
 joints spread, MCP, PIP and DIP. Its geometry, joint ranges, motor order and transmissions are
 those of ``virtualmodelcontrol.robots.adapt``. Its base frame: +z towards the fingertips, +y on
 the palm side, the thumb towards -x. Flexion is positive; a finger's spread is positive towards
-the pinky.
-
-Its own wrist stays straight, at 0, 0 (:data:`WRIST_MOTORS`): the arm moves and turns the hand,
-with its base at :func:`wrist_pose`.
+the pinky. Its own wrist stays straight, at 0, 0 (:data:`WRIST_MOTORS`): the arm moves and turns
+the hand, with its base at :func:`wrist_pose`.
 """
 
 from __future__ import annotations
@@ -30,6 +28,8 @@ import numpy as np
 
 from .fake import quaternion
 from .hands import FINGERS, Hand, Pose
+
+# -- The hand: joints, motors, geometry ------------------------------------------------------ #
 
 #: The ADAPT hand's 20 joints, in the order of :func:`joint_angles`.
 JOINTS = (
@@ -54,9 +54,121 @@ MOTORS = (
 WRIST_MOTORS = ("wrist_yaw", "wrist_pitch")
 WRIST_ANGLES = (0.0, 0.0)
 
-#: The range of each joint, (low, high) in radians, as in ``virtualmodelcontrol``. The thumb's CMC2
-#: goes from -70° to 30° (the real hand turned it to -73° in the experiments of
-#: HumanManipulationVMC), its IP from 0° to 90°.
+DIGITS = ("thumb", "index", "middle", "ring", "pinky")
+
+# The geometry of virtualmodelcontrol.robots.adapt, in the hand's base frame [m]: the palm, the
+# base of each digit, and each joint's origin (from the previous one, all frames aligned at zero)
+# and axis.
+PALM_ORIGIN = np.array([-0.017826, 0.003021, -0.027998])
+DIGIT_BASES = {
+    "thumb": (-0.001126, 0.011348, 0.056215),
+    "index": (-0.001654, 0.040836, 0.093101),
+    "middle": (0.02173, 0.039146, 0.092417),
+    "ring": (0.032774, 0.039367, 0.090557),
+    "pinky": (0.061943, 0.039534, 0.075302),
+}
+DIGIT_JOINTS = {
+    "thumb": (
+        ((-0.014257, 0.010829, -0.007467), (0.182125, -0.177737, -0.967078)),
+        ((-0.008631, 0.00194, -0.008807), (0.0, 0.983527, -0.180761)),
+        ((-0.04412, -0.000957, -0.00886), (0.168863, 0.20364, -0.964373)),
+        ((-0.031464, -0.001054, -0.005732), (0.168863, 0.20364, -0.964373)),
+    ),
+    "index": (
+        ((-0.006284, 0.000712, 0.005798), (0.140517, 0.943569, -0.299886)),
+        ((-0.001682, -0.00044, 0.009499), (-0.981214, 0.092278, -0.169421)),
+        ((-0.005287, 0.012722, 0.037552), (-0.981214, 0.092278, -0.169421)),
+        ((-0.003966, 0.009542, 0.028164), (-0.981214, 0.092278, -0.169421)),
+    ),
+    "middle": (
+        ((-0.005011, 0.000697, 0.006929), (0.036359, 0.936295, -0.349327)),
+        ((0.000289, -0.000149, 0.009651), (-0.998268, 0.050205, 0.030661)),
+        ((0.002081, 0.015643, 0.042143), (-0.998268, 0.050205, 0.030661)),
+        ((0.001387, 0.010428, 0.028095), (-0.998268, 0.050205, 0.030661)),
+    ),
+    "ring": (
+        ((0.006841, 0.000228, 0.005174), (-0.055584, 0.937022, -0.34482)),
+        ((0.002501, -0.000155, 0.009326), (-0.964998, 0.038236, 0.259457)),
+        ((0.010252, 0.013887, 0.036084), (-0.964998, 0.038236, 0.259457)),
+        ((0.007689, 0.010415, 0.027062), (-0.964998, 0.038236, 0.259457)),
+    ),
+    "pinky": (
+        ((-0.001073, -0.000153, 0.008511), (-0.211896, 0.947676, -0.238768)),
+        ((0.004931, -0.000503, 0.008288), (-0.859324, -0.064308, 0.507372)),
+        ((0.014895, 0.010006, 0.026496), (-0.859324, -0.064308, 0.507372)),
+        ((0.009309, 0.006254, 0.016559), (-0.859324, -0.064308, 0.507372)),
+    ),
+}
+#: Each fingertip from its last joint, in that joint's frame [m]: along the last bone, which runs
+#: along -x for the thumb (25 mm, as HumanManipulationVMC draws it) and along +z for the fingers.
+TIP_OFFSETS = {"thumb": np.array([-0.025, 0.0, 0.0]),
+               **{d: np.array([0.0, 0.0, 0.0175]) for d in ("index", "middle", "ring", "pinky")}}
+
+_AXES = np.array([[np.asarray(a) / np.linalg.norm(a) for _, a in DIGIT_JOINTS[d]] for d in DIGITS])  # (5, 4, 3)
+_OFFSETS = np.array([[o for o, _ in DIGIT_JOINTS[d]] for d in DIGITS], dtype=float)  # (5, 4, 3)
+_BASES = PALM_ORIGIN + np.array([DIGIT_BASES[d] for d in DIGITS], dtype=float)  # (5, 3)
+_TIPS = np.array([TIP_OFFSETS[d] for d in DIGITS], dtype=float)  # (5, 3)
+
+
+def _chains(joints: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The ADAPT hand's points, (5, 6, 3): per digit its base, four joints and tip; and its joint
+    axes, (5, 4, 3); in its base frame, for 20 joint angles."""
+    x, y, z = _AXES.reshape(20, 3).T
+    c, s = np.cos(joints), np.sin(joints)
+    t = 1.0 - c
+    turns = np.stack([c + x * x * t, x * y * t - z * s, x * z * t + y * s,
+                      y * x * t + z * s, c + y * y * t, y * z * t - x * s,
+                      z * x * t - y * s, z * y * t + x * s, c + z * z * t], axis=-1).reshape(5, 4, 3, 3)
+    points, axes = np.empty((5, 6, 3)), np.empty((5, 4, 3))
+    p, r = _BASES, np.broadcast_to(np.eye(3), (5, 3, 3))
+    points[:, 0] = p
+    for k in range(4):
+        p = p + np.einsum("dij,dj->di", r, _OFFSETS[:, k])
+        axes[:, k] = np.einsum("dij,dj->di", r, _AXES[:, k])
+        points[:, k + 1] = p
+        r = r @ turns[:, k]
+    points[:, 5] = p + np.einsum("dij,dj->di", r, _TIPS)
+    return points, axes
+
+
+_HOME, _ = _chains(np.zeros(20))
+
+# -- Motors and limits ------------------------------------------------------------------------ #
+
+# Transmissions: joint angle per motor angle.
+_FINGER_TRANSMISSIONS = {  # motor pulley, finger pulley, PIP cable constant [m]
+    "index": (0.005, 0.00304, 0.0109),
+    "middle": (0.005, 0.00304, 0.01127),
+    "ring": (0.005, 0.00304, 0.0109),
+    "pinky": (0.005, 0.00304, 0.00967),
+}
+_THUMB_TRANSMISSION = {"r_motor": 0.005, "CMC1_pulley": 0.01346, "CMC2_pulley": 0.00883,
+                       "MCP_c": 0.00605, "IP_c": 0.00577}
+_SPREAD_RATIOS = {"index": 1.0, "middle": 0.0, "ring": -1.0, "pinky": -1.5}
+_SPREAD_CORRECTION = -1.0 / 30.0
+
+
+def _coupling() -> np.ndarray:
+    t = _THUMB_TRANSMISSION
+    c = np.zeros((20, 13))
+    c[0, 0] = t["r_motor"] / t["CMC1_pulley"]
+    c[1, 1] = t["r_motor"] / t["CMC2_pulley"]
+    c[2, 2] = -t["r_motor"] / t["MCP_c"]
+    c[3, 3] = -t["r_motor"] / t["IP_c"]
+    for k, finger in enumerate(DIGITS[1:]):
+        row, mcp, pip = 4 + 4 * k, 5 + 2 * k, 6 + 2 * k
+        r_motor, r_pulley, c_pip = _FINGER_TRANSMISSIONS[finger]
+        c[row, 4] = _SPREAD_CORRECTION * _SPREAD_RATIOS[finger]
+        c[row + 1, mcp] = r_pulley / r_motor
+        c[row + 2, pip] = c[row + 3, pip] = -r_motor / c_pip
+    return c
+
+
+#: (20, 13): joint angles = COUPLING @ motor angles. Each finger's PIP motor turns its PIP and DIP
+#: joints together, and one motor spreads the index, ring and pinky (the middle finger stays).
+COUPLING = _coupling()
+
+#: The range of each joint, (low, high) in radians, as in ``virtualmodelcontrol``.
 JOINT_LIMITS = {
     "thumb_CMC1": (0.0, 1.5), "thumb_CMC2": (float(np.radians(-70.0)), float(np.radians(30.0))), "thumb_MCP": (0.0, 1.5),
     "thumb_IP": (0.0, float(np.radians(90.0))),
@@ -66,6 +178,35 @@ JOINT_LIMITS = {
     "pinky_spread": (0.0, 0.3), "pinky_MCP": (0.0, 1.5), "pinky_PIP": (0.0, 1.2), "pinky_DIP": (0.0, 1.2),
 }  # fmt: skip
 
+_LOW = np.array([JOINT_LIMITS[j][0] for j in JOINTS])
+_HIGH = np.array([JOINT_LIMITS[j][1] for j in JOINTS])
+_PINV = np.linalg.pinv(COUPLING)  # the least-squares motor angles for 20 joint angles
+
+
+def _motor_ranges() -> tuple[np.ndarray, np.ndarray]:
+    """For each motor, the angles that keep every joint it turns within JOINT_LIMITS."""
+    low, high = np.full(13, -np.inf), np.full(13, np.inf)
+    for j, row in enumerate(COUPLING):
+        for m in np.flatnonzero(row):
+            a, b = sorted((_LOW[j] / row[m], _HIGH[j] / row[m]))
+            low[m], high[m] = max(low[m], a), min(high[m], b)
+    return low, high
+
+
+_MOTOR_LOW, _MOTOR_HIGH = _motor_ranges()
+
+
+def _motors(joints: np.ndarray, clip: bool) -> np.ndarray:
+    """The motor angles closest to 20 joint angles, within the motors' ranges if ``clip``."""
+    motors = _PINV @ joints
+    return np.clip(motors, _MOTOR_LOW, _MOTOR_HIGH) if clip else motors
+
+
+# -- Your angles ------------------------------------------------------------------------------ #
+
+# From the axes of your wrist (WebXR: -z towards the fingers, -y out of the palm) to the ADAPT
+# base frame's (+z towards the fingers, +y on the palm side): a half turn about x.
+_FROM_WEBXR = np.diag([1.0, -1.0, -1.0])
 _COLUMNS = ("base", "spread", "middle", "tip")
 
 #: Your angles that the ADAPT joints follow, as the dashboard and the 3D view show them: each
@@ -74,6 +215,18 @@ _COLUMNS = ("base", "spread", "middle", "tip")
 #: about the hand's long axis, from sideways towards the palm's front, as the ADAPT's CMC1 turns
 #: its own. :func:`your_angles` reads them, in degrees.
 YOUR_ANGLES = tuple(f"{finger} {column}" for finger in FINGERS for column in _COLUMNS) + ("thumb turn",)
+
+
+def your_angles(hand: Hand) -> dict[str, float]:
+    """Your angles that the ADAPT joints follow (:data:`YOUR_ANGLES`), in degrees, by name."""
+    a = np.degrees(hand.angles)
+    out = {f"{finger} {column}": float(a[f, c]) for f, finger in enumerate(FINGERS) for c, column in enumerate(_COLUMNS)}
+    d = _FROM_WEBXR @ (hand.rotations[0].T @ (hand.positions[2] - hand.positions[1]))  # your thumb's first bone
+    out["thumb turn"] = float(np.degrees(np.arctan2(d[1], -d[0])))
+    return out
+
+
+# -- The calibration -------------------------------------------------------------------------- #
 
 #: The angles of yours (:data:`YOUR_ANGLES`) that each ADAPT joint follows: the thumb's CMC2 two,
 #: its base and its spread; the middle finger's spread none (it stays at 0); the others one.
@@ -95,10 +248,8 @@ FOLLOWS = {
 #:
 #: These are the library's points. Change them at any time, in Python or in the 3D view
 #: (``metaquest-teleop --calibration``, which saves each calibration to a file in
-#: :data:`CALIBRATIONS`: :func:`save_calibration`, :func:`load_calibration`). A calibration becomes
-#: the library's with ``scripts/set_calibration.py`` in its repository. The first ones: your open
-#: hand gives all zeros (the hand's home), a power grasp about PC1 and a pinch about PC2 of
-#: HumanManipulationVMC's PoseControl (Santello et al., 1998).
+#: :data:`CALIBRATIONS`); a calibration becomes the library's with ``scripts/set_calibration.py``
+#: in the repository.
 CALIBRATION = {
     "thumb_CMC1": {5: 0, 95: 86}, "thumb_CMC2": {(0, 30): 20, (20, 35): 0, (43, 21.6): -6, (44.3, 15): -1, (70, 20): -60},
     "thumb_MCP": {0: 0, 65: 86}, "thumb_IP": {0: 0, 44.9: 42, 45: 90},
@@ -114,7 +265,8 @@ _DEFAULT_CALIBRATION = {joint: dict(points) for joint, points in CALIBRATION.ite
 #: ``~/.config`` when set).
 CALIBRATIONS = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "metaquest-teleop" / "calibrations"
 
-def _model(joint: str, points: dict) -> np.ndarray:
+
+def _line(joint: str, points: dict) -> np.ndarray:
     """The line closest to a joint's points (for two angles of yours, the plane), by least squares:
     its angle at yours all 0, then how much it turns per degree of each, (k + 1,). ValueError if
     the points cannot make one."""
@@ -136,7 +288,7 @@ def _model(joint: str, points: dict) -> np.ndarray:
     return np.linalg.lstsq(a, np.array(its), rcond=None)[0]
 
 
-_MODELS: dict = {}  # joint -> (its points, as items, when fitted; its line)
+_LINES: dict = {}  # joint -> (its points, as items, when fitted; its line)
 
 
 def calibrated(joint: str, *yours: float) -> float:
@@ -150,15 +302,15 @@ def calibrated(joint: str, *yours: float) -> float:
         return 0.0
     points = CALIBRATION[joint]
     items = tuple(points.items())
-    cached = _MODELS.get(joint)
+    cached = _LINES.get(joint)
     if cached is None or cached[0] != items:
-        cached = _MODELS[joint] = (items, _model(joint, points))
+        cached = _LINES[joint] = (items, _line(joint, points))
     line = cached[1]
     return float(line[0] + line[1:] @ np.asarray(yours, dtype=float))
 
 
 def _points(joint: str, rows) -> dict:
-    """A joint's points from rows ``[[your angle(s)..., its angle], ...]``, checked."""
+    """A joint's points from rows ``[[your angle(s)..., its angle], ...]``, checked and sorted."""
     k = len(FOLLOWS.get(joint, ()))
     if k == 0:
         raise ValueError(f"{joint!r} is not an ADAPT joint that follows yours (adapt.FOLLOWS)")
@@ -168,7 +320,7 @@ def _points(joint: str, rows) -> dict:
     if not ok:
         raise ValueError(f"{joint}: expected points [[{', '.join(FOLLOWS[joint])}, its angle], ...] in degrees")
     points = dict(sorted({(row[0] if k == 1 else tuple(row[:k])): row[k] for row in rows}.items()))
-    _model(joint, points)  # ValueError if it cannot follow them
+    _line(joint, points)  # ValueError if it cannot follow them
     return points
 
 
@@ -221,240 +373,77 @@ def reset_calibration(joint: str | None = None) -> None:
             del CALIBRATION[extra]
 
 
-DIGITS = ("thumb", "index", "middle", "ring", "pinky")
-
-# The geometry of virtualmodelcontrol.robots.adapt, in the hand's base frame [m]: the palm, the
-# base of each digit, and each joint's origin (from the previous one, all frames aligned at zero)
-# and axis.
-PALM_ORIGIN = np.array([-0.017826, 0.003021, -0.027998])
-DIGIT_BASES = {
-    "thumb": (-0.001126, 0.011348, 0.056215),
-    "index": (-0.001654, 0.040836, 0.093101),
-    "middle": (0.02173, 0.039146, 0.092417),
-    "ring": (0.032774, 0.039367, 0.090557),
-    "pinky": (0.061943, 0.039534, 0.075302),
-}
-DIGIT_JOINTS = {
-    "thumb": (
-        ((-0.014257, 0.010829, -0.007467), (0.182125, -0.177737, -0.967078)),
-        ((-0.008631, 0.00194, -0.008807), (0.0, 0.983527, -0.180761)),
-        ((-0.04412, -0.000957, -0.00886), (0.168863, 0.20364, -0.964373)),
-        ((-0.031464, -0.001054, -0.005732), (0.168863, 0.20364, -0.964373)),
-    ),
-    "index": (
-        ((-0.006284, 0.000712, 0.005798), (0.140517, 0.943569, -0.299886)),
-        ((-0.001682, -0.00044, 0.009499), (-0.981214, 0.092278, -0.169421)),
-        ((-0.005287, 0.012722, 0.037552), (-0.981214, 0.092278, -0.169421)),
-        ((-0.003966, 0.009542, 0.028164), (-0.981214, 0.092278, -0.169421)),
-    ),
-    "middle": (
-        ((-0.005011, 0.000697, 0.006929), (0.036359, 0.936295, -0.349327)),
-        ((0.000289, -0.000149, 0.009651), (-0.998268, 0.050205, 0.030661)),
-        ((0.002081, 0.015643, 0.042143), (-0.998268, 0.050205, 0.030661)),
-        ((0.001387, 0.010428, 0.028095), (-0.998268, 0.050205, 0.030661)),
-    ),
-    "ring": (
-        ((0.006841, 0.000228, 0.005174), (-0.055584, 0.937022, -0.34482)),
-        ((0.002501, -0.000155, 0.009326), (-0.964998, 0.038236, 0.259457)),
-        ((0.010252, 0.013887, 0.036084), (-0.964998, 0.038236, 0.259457)),
-        ((0.007689, 0.010415, 0.027062), (-0.964998, 0.038236, 0.259457)),
-    ),
-    "pinky": (
-        ((-0.001073, -0.000153, 0.008511), (-0.211896, 0.947676, -0.238768)),
-        ((0.004931, -0.000503, 0.008288), (-0.859324, -0.064308, 0.507372)),
-        ((0.014895, 0.010006, 0.026496), (-0.859324, -0.064308, 0.507372)),
-        ((0.009309, 0.006254, 0.016559), (-0.859324, -0.064308, 0.507372)),
-    ),
-}
-#: Each fingertip from its last joint, in that joint's frame [m]: along the last bone, which runs
-#: along -x for the thumb (25 mm, as HumanManipulationVMC draws it) and along +z for the fingers.
-TIP_OFFSETS = {"thumb": np.array([-0.025, 0.0, 0.0]),
-               **{d: np.array([0.0, 0.0, 0.0175]) for d in ("index", "middle", "ring", "pinky")}}
-TIP_OFFSET = TIP_OFFSETS["index"]  # the fingers' tip
-
-# Transmissions: joint angle per motor angle.
-_FINGER_TRANSMISSIONS = {  # motor pulley, finger pulley, PIP cable constant [m]
-    "index": (0.005, 0.00304, 0.0109),
-    "middle": (0.005, 0.00304, 0.01127),
-    "ring": (0.005, 0.00304, 0.0109),
-    "pinky": (0.005, 0.00304, 0.00967),
-}
-_THUMB_TRANSMISSION = {"r_motor": 0.005, "CMC1_pulley": 0.01346, "CMC2_pulley": 0.00883,
-                       "MCP_c": 0.00605, "IP_c": 0.00577}
-_SPREAD_RATIOS = {"index": 1.0, "middle": 0.0, "ring": -1.0, "pinky": -1.5}
-_SPREAD_CORRECTION = -1.0 / 30.0
-
-
-def _coupling() -> np.ndarray:
-    t = _THUMB_TRANSMISSION
-    c = np.zeros((20, 13))
-    c[0, 0] = t["r_motor"] / t["CMC1_pulley"]
-    c[1, 1] = t["r_motor"] / t["CMC2_pulley"]
-    c[2, 2] = -t["r_motor"] / t["MCP_c"]
-    c[3, 3] = -t["r_motor"] / t["IP_c"]
-    for k, finger in enumerate(DIGITS[1:]):
-        row, mcp, pip = 4 + 4 * k, 5 + 2 * k, 6 + 2 * k
-        r_motor, r_pulley, c_pip = _FINGER_TRANSMISSIONS[finger]
-        c[row, 4] = _SPREAD_CORRECTION * _SPREAD_RATIOS[finger]
-        c[row + 1, mcp] = r_pulley / r_motor
-        c[row + 2, pip] = c[row + 3, pip] = -r_motor / c_pip
-    return c
-
-
-#: (20, 13): joint angles = COUPLING @ motor angles. Each finger's PIP motor turns its PIP and DIP
-#: joints together, and one motor spreads the index, ring and pinky (the middle finger stays).
-COUPLING = _coupling()
-
-# From the axes of your wrist (WebXR: -z towards the fingers, -y out of the palm) to the ADAPT
-# base frame's (+z towards the fingers, +y on the palm side): a half turn about x.
-_FROM_WEBXR = np.diag([1.0, -1.0, -1.0])
-
-_LOW = np.array([JOINT_LIMITS[j][0] for j in JOINTS])
-_HIGH = np.array([JOINT_LIMITS[j][1] for j in JOINTS])
-_FIT = np.linalg.pinv(COUPLING)  # the least-squares motor angles for 20 joint angles
-
-
-def _motor_ranges() -> tuple[np.ndarray, np.ndarray]:
-    """For each motor, the angles that keep every joint it turns within JOINT_LIMITS."""
-    low, high = np.full(13, -np.inf), np.full(13, np.inf)
-    for j, row in enumerate(COUPLING):
-        for m in np.flatnonzero(row):
-            a, b = sorted((_LOW[j] / row[m], _HIGH[j] / row[m]))
-            low[m], high[m] = max(low[m], a), min(high[m], b)
-    return low, high
-
-
-_MOTOR_LOW, _MOTOR_HIGH = _motor_ranges()
-
-
-def _rotation(axis, angle: float) -> np.ndarray:
-    """The rotation by ``angle`` about ``axis`` (right-hand rule)."""
-    x, y, z = np.asarray(axis, dtype=float) / np.linalg.norm(axis)
-    c, s, t = np.cos(angle), np.sin(angle), 1.0 - np.cos(angle)
-    return np.array([[c + x * x * t, x * y * t - z * s, x * z * t + y * s],
-                     [y * x * t + z * s, c + y * y * t, y * z * t - x * s],
-                     [z * x * t - y * s, z * y * t + x * s, c + z * z * t]])
-
-
-def your_angles(hand: Hand) -> dict[str, float]:
-    """Your angles that the ADAPT joints follow (:data:`YOUR_ANGLES`), in degrees, by name."""
-    a = np.degrees(hand.angles)
-    out = {f"{finger} {column}": float(a[f, c]) for f, finger in enumerate(FINGERS) for c, column in enumerate(_COLUMNS)}
-    # Your thumb's first bone, in the ADAPT axes, read as the ADAPT's CMC1 turns its own: about the
-    # hand's long axis, from sideways towards the palm's front.
-    d = _FROM_WEBXR @ (hand.rotations[0].T @ (hand.positions[2] - hand.positions[1]))
-    out["thumb turn"] = float(np.degrees(np.arctan2(d[1], -d[0])))
-    return out
-
-
-def _wanted(hand: Hand) -> np.ndarray:
-    """(20,) each ADAPT joint through its calibration (:data:`CALIBRATION`), radians, before its limits."""
-    yours = your_angles(hand)
-    return np.radians([calibrated(j, *(yours[name] for name in FOLLOWS[j])) for j in JOINTS])
-
-
 def _calibration_key() -> tuple:
     """The calibration as it is now, to know when it changed."""
     return tuple((FOLLOWS[j], tuple(CALIBRATION[j].items()) if j in CALIBRATION else ()) for j in JOINTS)
 
 
-def _fit(joints: np.ndarray, clip: bool) -> np.ndarray:
-    motors = _FIT @ joints
-    return np.clip(motors, _MOTOR_LOW, _MOTOR_HIGH) if clip else motors
+def _wanted(hand: Hand) -> np.ndarray:
+    """(20,) each ADAPT joint through its calibration, radians, before its limits."""
+    yours = your_angles(hand)
+    return np.radians([calibrated(j, *(yours[name] for name in FOLLOWS[j])) for j in JOINTS])
 
 
-#: Fit the ADAPT hand's pose to yours (True, the default of :func:`joint_angles` and
-#: :func:`motor_angles`), or map it joint for joint, your range onto its range (False). Change it
-#: at any time: ``metaquest-teleop --no-adapt-fit`` sets it to False.
+# -- The fit ---------------------------------------------------------------------------------- #
+
+#: Fit the ADAPT fingers to yours, around the thumb (True, the default of :func:`joint_angles` and
+#: :func:`motor_angles`), or have them follow the calibration too, joint for joint (False). Change
+#: it at any time: ``metaquest-teleop --no-adapt-fit`` sets it to False.
 FIT = True
 
-# The fit: how much each matched point counts, per digit (a finger: its PIP, DIP and tip; the
-# thumb's shape does not count: the thumb is held as yours); a pinch (your thumb tip near a
+# How much each of a finger's points counts (its PIP, DIP and tip); a pinch (your thumb tip near a
 # fingertip); and the pull towards the joint-for-joint pose, which picks one among poses that fit
-# equally well [m/rad].
-_POINT_WEIGHTS = np.array([[0.0, 0.0, 0.0]] + [[0.5, 0.7, 1.0]] * 4)
+# as well [m/rad].
+_POINT_WEIGHTS = np.array([0.5, 0.7, 1.0])
 _PINCH_REACH, _PINCH_WEIGHT = 0.03, 3.0  # m: a gap this small counts, up to 3x a fingertip
 _PULL = 0.0005
 _ITERATIONS = 24
 
-_AXES = np.array([[np.asarray(a) / np.linalg.norm(a) for _, a in DIGIT_JOINTS[d]] for d in DIGITS])  # (5, 4, 3)
-_OFFSETS = np.array([[o for o, _ in DIGIT_JOINTS[d]] for d in DIGITS], dtype=float)  # (5, 4, 3)
-_BASES = PALM_ORIGIN + np.array([DIGIT_BASES[d] for d in DIGITS], dtype=float)  # (5, 3)
-_TIPS = np.array([TIP_OFFSETS[d] for d in DIGITS], dtype=float)  # (5, 3)
 _BEFORE = np.array([[j <= i - 2 for j in range(4)] for i in (3, 4, 5)], dtype=float)  # joint j moves point i
-_YOUR_POINTS = np.array([[2, 3, 4], [7, 8, 9], [12, 13, 14], [17, 18, 19], [22, 23, 24]])  # yours <-> ADAPT points 3, 4, 5
+_YOUR_POINTS = np.array([[7, 8, 9], [12, 13, 14], [17, 18, 19], [22, 23, 24]])  # each finger's PIP, DIP, tip: the ADAPT's points 3, 4, 5
 _YOUR_KNUCKLES, _YOUR_TIPS = [6, 11, 16, 21], [9, 14, 19, 24]
 
 
-def _chains(joints: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """The ADAPT hand's points, (5, 6, 3): per digit its base, four joints and tip; and its joint
-    axes, (5, 4, 3); in its base frame. As :func:`positions`, all digits at once."""
-    x, y, z = _AXES.reshape(20, 3).T
-    c, s = np.cos(joints), np.sin(joints)
-    t = 1.0 - c
-    turns = np.stack([c + x * x * t, x * y * t - z * s, x * z * t + y * s,
-                      y * x * t + z * s, c + y * y * t, y * z * t - x * s,
-                      z * x * t - y * s, z * y * t + x * s, c + z * z * t], axis=-1).reshape(5, 4, 3, 3)
-    points, axes = np.empty((5, 6, 3)), np.empty((5, 4, 3))
-    p, r = _BASES, np.broadcast_to(np.eye(3), (5, 3, 3))
-    points[:, 0] = p
-    for k in range(4):
-        p = p + np.einsum("dij,dj->di", r, _OFFSETS[:, k])
-        axes[:, k] = np.einsum("dij,dj->di", r, _AXES[:, k])
-        points[:, k + 1] = p
-        r = r @ turns[:, k]
-    points[:, 5] = p + np.einsum("dij,dj->di", r, _TIPS)
-    return points, axes
-
-
-_HOME, _ = _chains(np.zeros(20))
-_THUMB_LENGTH = np.linalg.norm(np.diff(_HOME[0, 2:6], axis=0), axis=1).sum()  # CMC2 to the tip
-
-
 def _targets(hand: Hand) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Where the ADAPT's points should be, for your hand: (5, 3, 3), per digit (the thumb's from
-    its base, at the ADAPT thumb's length); the gaps from the thumb tip to each fingertip, (4, 3);
-    and how much each gap counts, (4,)."""
+    """For your hand, with your knuckles on the ADAPT's (a scale and a shift): where each ADAPT
+    finger's PIP, DIP and tip should be, (4, 3, 3); the gaps from the thumb tip to each fingertip,
+    (4, 3); and how much each gap counts, (4,)."""
     yours = (_FROM_WEBXR @ (hand.rotations[0].T @ (hand.positions - hand.positions[0]).T)).T
-    knuckles, theirs = yours[_YOUR_KNUCKLES], _HOME[1:, 2]  # your knuckles on the ADAPT's
+    knuckles, theirs = yours[_YOUR_KNUCKLES], _HOME[1:, 2]
     mine, home = knuckles.mean(axis=0), theirs.mean(axis=0)
     scale = np.sum((knuckles - mine) * (theirs - home)) / np.sum((knuckles - mine) ** 2)
     at = home + scale * (yours - mine)
-    goal = at[_YOUR_POINTS]
-    goal[0] = _THUMB_LENGTH / np.linalg.norm(np.diff(at[1:5], axis=0), axis=1).sum() * (goal[0] - at[1])
     gaps = np.linalg.norm(hand.positions[_YOUR_TIPS] - hand.positions[4], axis=1)
-    return goal, at[4] - at[_YOUR_TIPS], _PINCH_WEIGHT * np.exp(-((gaps / _PINCH_REACH) ** 2))
+    return at[_YOUR_POINTS], at[4] - at[_YOUR_TIPS], _PINCH_WEIGHT * np.exp(-((gaps / _PINCH_REACH) ** 2))
 
 
 def _residuals(motors, goal, gaps, pinch, start) -> tuple[np.ndarray, np.ndarray]:
-    """How far the ADAPT hand is from yours with these motors (70,), and its Jacobian (70, 13)."""
+    """How far the ADAPT fingers are from yours with these motors (61,), and the Jacobian (61, 13)."""
     points, axes = _chains(COUPLING @ motors)
-    ours = points[:, 3:6].copy()
-    ours[0] -= points[0, 2]  # the thumb's shape, from its base
     # A point moves with each joint before it: d point / d angle = axis x (point - joint).
     turn = np.cross(axes[:, None], points[:, 3:6, None] - points[:, None, 1:5]) * _BEFORE[None, :, :, None]
-    tips = turn[:, 2].copy()  # (5, 4, 3): each tip, in the base frame
-    turn[0, :, 0] -= np.cross(axes[0, 0], points[0, 2] - points[0, 1])  # the thumb's base turns with CMC1
-    d = np.arange(5)
-    shape = np.zeros((5, 3, 3, 5, 4))  # digit, point, xyz | digit, joint
-    shape[d, :, :, d, :] = _POINT_WEIGHTS[..., None, None] * turn.transpose(0, 1, 3, 2)
+    tips = turn[:, 2]  # (5, 4, 3): each digit's tip, per joint
+    f = np.arange(4)
+    shape = np.zeros((4, 3, 3, 5, 4))  # finger, point, xyz | digit, joint
+    shape[f, :, :, f + 1, :] = _POINT_WEIGHTS[None, :, None, None] * turn[1:].transpose(0, 1, 3, 2)
     pinches = np.zeros((4, 3, 5, 4))  # finger, xyz | digit, joint
     pinches[:, :, 0, :] = pinch[:, None, None] * tips[0].T
-    pinches[d[:4], :, d[1:], :] = -pinch[:, None, None] * tips[1:].transpose(0, 2, 1)
-    r = np.concatenate([(_POINT_WEIGHTS[..., None] * (ours - goal)).ravel(),
+    pinches[f, :, f + 1, :] = -pinch[:, None, None] * tips[1:].transpose(0, 2, 1)
+    r = np.concatenate([(_POINT_WEIGHTS[:, None] * (points[1:, 3:6] - goal)).ravel(),
                         (pinch[:, None] * ((points[0, 5] - points[1:, 5]) - gaps)).ravel(),
                         _PULL * (motors - start)])
-    jac = np.vstack([np.vstack([shape.reshape(45, 20), pinches.reshape(12, 20)]) @ COUPLING, _PULL * np.eye(13)])
+    jac = np.vstack([np.vstack([shape.reshape(36, 20), pinches.reshape(12, 20)]) @ COUPLING, _PULL * np.eye(13)])
     return r, jac
 
 
 def _solve(hand: Hand, clip: bool) -> np.ndarray:
-    """(13,) the motor angles that put the ADAPT hand closest to yours: Levenberg-Marquardt from
-    the joint-for-joint pose, within the motors' ranges if ``clip``."""
+    """(13,) the motor angles that put the ADAPT fingers closest to yours, the thumb where the
+    calibration puts it: Levenberg-Marquardt from the joint-for-joint pose, within the motors'
+    ranges if ``clip``."""
     low, high = (_MOTOR_LOW.copy(), _MOTOR_HIGH.copy()) if clip else (np.full(13, -np.inf), np.full(13, np.inf))
     goal, gaps, pinch = _targets(hand)
-    m = start = _fit(_wanted(hand), clip)
-    low[:4] = high[:4] = start[:4]  # the thumb stays as yours, joint for joint; the fingers fit around it
+    m = start = _motors(_wanted(hand), clip)
+    low[:4] = high[:4] = start[:4]  # the thumb's motors stay
     r, jac = _residuals(m, goal, gaps, pinch, start)
     cost, damping, grow = r @ r, 1e-3, 2.0
     for _ in range(_ITERATIONS):
@@ -484,32 +473,34 @@ _LAST: dict = {}  # clip -> (hand, the calibration, motors): the last fit, for t
 
 
 def _fitted(hand: Hand, clip: bool) -> np.ndarray:
-    ranges = _calibration_key()
+    calibration = _calibration_key()
     last = _LAST.get(clip)
-    if last is not None and last[0] is hand and last[1] == ranges:
+    if last is not None and last[0] is hand and last[1] == calibration:
         return last[2].copy()
     motors = _solve(hand, clip)
-    _LAST[clip] = (hand, ranges, motors)
+    _LAST[clip] = (hand, calibration, motors)
     return motors.copy()
+
+
+# -- Joints, motors, wrist ---------------------------------------------------------------------- #
 
 
 def joint_angles(hand: Hand, clip: bool = True, coupled: bool = True, fit: bool | None = None) -> np.ndarray:
     """(20,) the ADAPT joint angles for your hand, radians, in :data:`JOINTS` order: a pose it can take.
 
-    The thumb always follows your calibration (:data:`CALIBRATION`): each of its joints the angles
-    of yours it follows (:data:`FOLLOWS`), through your points.
+    The thumb follows the calibration (:data:`CALIBRATION`): each of its joints the angles of yours
+    it follows (:data:`FOLLOWS`), through its points.
 
-    The fit (``fit=True``, the default: :data:`FIT`): the fingers' pose that puts the ADAPT hand
-    closest to yours, through its forward kinematics, around that thumb. Your knuckles on its
-    knuckles (a scale and a shift), its fingers' PIP, DIP and tips on yours, and a fingertip as
-    near the thumb tip as yours is, when you pinch. Only poses the hand can take: its motors
+    The fit (``fit=True``, the default: :data:`FIT`): the fingers' pose that puts them closest to
+    yours, through the hand's forward kinematics, around that thumb. Your knuckles on its knuckles
+    (a scale and a shift), its fingers' PIP, DIP and tips on yours, and a fingertip as near the
+    thumb tip as yours is, when you pinch. Only poses the hand can take: its motors
     (:data:`COUPLING`), within :data:`JOINT_LIMITS` (``clip=False``: without them).
 
-    Joint for joint (``fit=False``): every joint follows your calibration, the fingers' too: a
-    finger's spread, MCP, PIP and DIP follow your spread, base, middle and tip. Then the pose the
-    hand can take, as in ``virtualmodelcontrol``: a finger's DIP mimics its PIP (both the mean of
-    the two), and one motor spreads the fingers (the best fit of the three). The fit starts from
-    this pose.
+    Joint for joint (``fit=False``): the fingers follow the calibration too: a finger's spread,
+    MCP, PIP and DIP follow your spread, base, middle and tip. Then the pose the hand can take, as
+    in ``virtualmodelcontrol``: a finger's DIP mimics its PIP (both the mean of the two), and one
+    motor spreads the fingers (the best fit of the three). The fit starts from this pose.
 
     ``coupled=False`` gives the joint-for-joint angles before the motors, joint by joint (with or
     without ``fit``). ``clip`` keeps every joint within :data:`JOINT_LIMITS`.
@@ -517,7 +508,7 @@ def joint_angles(hand: Hand, clip: bool = True, coupled: bool = True, fit: bool 
     if not coupled:
         wanted = _wanted(hand)
         return np.clip(wanted, _LOW, _HIGH) if clip else wanted
-    motors = _fitted(hand, clip) if (FIT if fit is None else fit) else _fit(_wanted(hand), clip)
+    motors = _fitted(hand, clip) if (FIT if fit is None else fit) else _motors(_wanted(hand), clip)
     joints = COUPLING @ motors
     return np.clip(joints, _LOW, _HIGH) if clip else joints  # only rounding to take off
 
@@ -533,8 +524,8 @@ def motor_angles(source, clip: bool = True, fit: bool | None = None) -> np.ndarr
     every joint it turns stays within :data:`JOINT_LIMITS`.
     """
     if isinstance(source, Hand):
-        return _fitted(source, clip) if (FIT if fit is None else fit) else _fit(_wanted(source), clip)
-    return _fit(np.asarray(source, dtype=float), clip)
+        return _fitted(source, clip) if (FIT if fit is None else fit) else _motors(_wanted(source), clip)
+    return _motors(np.asarray(source, dtype=float), clip)
 
 
 def wrist_pose(hand: Hand) -> Pose:
@@ -547,16 +538,5 @@ def wrist_pose(hand: Hand) -> Pose:
 def positions(joints) -> dict[str, np.ndarray]:
     """The ADAPT hand's shape for 20 joint angles: for each digit, (6, 3) points in its base frame
     [m]: the digit's base, its four joints and its tip."""
-    joints = np.asarray(joints, dtype=float)
-    out = {}
-    for d, digit in enumerate(DIGITS):
-        p = PALM_ORIGIN + np.asarray(DIGIT_BASES[digit])
-        r = np.eye(3)
-        points = [p]
-        for k, (origin, axis) in enumerate(DIGIT_JOINTS[digit]):
-            p = p + r @ np.asarray(origin)
-            points.append(p)
-            r = r @ _rotation(axis, joints[4 * d + k])
-        points.append(p + r @ TIP_OFFSETS[digit])
-        out[digit] = np.array(points)
-    return out
+    points, _ = _chains(np.asarray(joints, dtype=float))
+    return {digit: points[d] for d, digit in enumerate(DIGITS)}

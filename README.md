@@ -55,7 +55,8 @@ see [Teleoperation](https://vigno0405.github.io/MetaQuestTeleop/teleop.html) and
 ## ADAPT hand
 
 `metaquest_teleop.adapt` turns your hand into the ADAPT hand's 20 joint angles and 13 motor
-angles, and gives your wrist's pose: see [ADAPT Hand](https://vigno0405.github.io/MetaQuestTeleop/adapt.html).
+angles, and gives your wrist's pose. `metaquest-teleop --calibration` calibrates it to your hand,
+in the 3D view: see [ADAPT Hand](https://vigno0405.github.io/MetaQuestTeleop/adapt.html).
 
 ## License
 

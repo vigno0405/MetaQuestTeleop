@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0 (2026-11-17)
+
+The first stable release: the stream, the 3D view, the teleoperation, ROS 2 and the ADAPT hand,
+with its calibration, as in 0.13.1.
+
+- The code is cleaned up, with no change in what it computes: `metaquest_teleop.adapt` is in
+  sections (the hand, motors and limits, your angles, the calibration, the fit, joints and
+  wrist), and the 3D view's copy of it follows the same order. The fit no longer computes the
+  thumb's shape, which it never used: the thumb follows the calibration.
+- `adapt.TIP_OFFSET` is gone: `adapt.TIP_OFFSETS["index"]` is the fingers' tip.
+- `metaquest_teleop.adapt` is in the package's `__all__`.
+
 ## 0.13.1 (2026-11-17)
 
 - The library's calibration: the thumb's CMC2 and IP take the points of a calibration made with
