@@ -23,14 +23,27 @@ VIEW = files("metaquest_teleop") / "view.html"
 MIRROR = np.diag([-1.0, 1.0, 1.0])
 
 
+# The ADAPT calibration the tests expect (the library's first): an open hand gives home, a power
+# grasp PC1, a pinch PC2. The library's own may change with each calibration made its own.
+TYPICAL = {
+    "thumb_CMC1": {5: 0, 95: 86}, "thumb_CMC2": {(0, 30): 20, (20, 35): 0, (70, 20): -60},
+    "thumb_MCP": {0: 0, 65: 86}, "thumb_IP": {0: 0, 45: 90},
+    "index_spread": {0: 0, 20: -17}, "index_MCP": {0: 0, 90: 86}, "index_PIP": {0: 0, 90: 69}, "index_DIP": {0: 0, 60: 69},
+    "middle_MCP": {0: 0, 90: 86}, "middle_PIP": {0: 0, 90: 69}, "middle_DIP": {0: 0, 60: 69},
+    "ring_spread": {-15: 17, 0: 0}, "ring_MCP": {0: 0, 90: 86}, "ring_PIP": {0: 0, 90: 69}, "ring_DIP": {0: 0, 60: 69},
+    "pinky_spread": {-25: 17, 0: 0}, "pinky_MCP": {0: 0, 90: 86}, "pinky_PIP": {0: 0, 90: 69}, "pinky_DIP": {0: 0, 60: 69},
+}  # fmt: skip
+
+
 @pytest.fixture(autouse=True)
 def _calibration(tmp_path, monkeypatch):
-    """Every test starts from the default ADAPT calibration, and none reads or writes yours."""
+    """Every test starts from the typical ADAPT calibration, and none writes where yours go."""
     from metaquest_teleop import adapt
 
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))  # and the commands the tests run
-    monkeypatch.setattr(adapt, "CALIBRATION_FILE", tmp_path / "config" / "metaquest-teleop" / "adapt_calibration.json")
+    monkeypatch.setattr(adapt, "CALIBRATIONS", tmp_path / "config" / "metaquest-teleop" / "calibrations")
     adapt.reset_calibration()
+    adapt.CALIBRATION.update({joint: dict(points) for joint, points in TYPICAL.items()})
     yield
     adapt.reset_calibration()
 
@@ -459,35 +472,78 @@ def test_each_joint_goes_through_every_point_of_yours():
 def test_the_calibration_is_saved_and_loaded(tmp_path):
     from metaquest_teleop import adapt
 
-    path = tmp_path / "mine.json"
-    assert adapt.load_calibration(path) is False and adapt.CALIBRATION == adapt._DEFAULT_CALIBRATION  # none yet
+    path = tmp_path / "calibrations" / "mine.json"
     adapt.CALIBRATION["thumb_IP"] = {0: 0, 20: 30, 45: 90}
     adapt.CALIBRATION["thumb_CMC2"][(45, 25)] = -20
     assert adapt.save_calibration(path) == path
-    assert json.loads(path.read_text()) == {  # only what is not the default, in degrees
-        "thumb_CMC2": [[20, 35, 0], [70, 20, -60], [0, 30, 20], [45, 25, -20]], "thumb_IP": [[0, 0], [20, 30], [45, 90]]}
+    saved = json.loads(path.read_text())  # all of it, in degrees
+    assert saved == {joint: adapt._rows(points) for joint, points in adapt.CALIBRATION.items()}
+    assert saved["thumb_IP"] == [[0, 0], [20, 30], [45, 90]] and [45, 25, -20] in saved["thumb_CMC2"]
     hand = synthetic_hand("right", np.array([[0.8, 0.4, 0.3, np.radians(20)]] + [[0.4, 0.0, 0.5, 0.3]] * 4), _pose(np.random.default_rng(4)))
     mine = adapt.joint_angles(hand)
-    adapt.reset_calibration()
+    adapt.reset_calibration()  # the library's
     assert adapt.CALIBRATION == adapt._DEFAULT_CALIBRATION
     assert not np.allclose(adapt.joint_angles(hand), mine)
-    assert adapt.load_calibration(path) is True
+    adapt.load_calibration(path)
     assert np.allclose(adapt.joint_angles(hand), mine)
     adapt.CALIBRATION["index_MCP"] = {0: 0, 45: 86}
-    adapt.reset_calibration("index_MCP")  # one joint back to its default points
-    assert adapt.CALIBRATION["index_MCP"] == {0: 0, 90: 86} and adapt.CALIBRATION["thumb_IP"] == {0: 0, 20: 30, 45: 90}
-    assert adapt.save_calibration() == adapt.CALIBRATION_FILE and adapt.load_calibration()  # by default, there
-    adapt.reset_calibration()
-    adapt.save_calibration(path)
-    assert json.loads(path.read_text()) == {}  # all defaults
-    # Not a calibration: refused, and nothing changes.
+    adapt.reset_calibration("index_MCP")  # one joint back to the library's points
+    assert adapt.CALIBRATION["index_MCP"] == adapt._DEFAULT_CALIBRATION["index_MCP"]
+    assert adapt.CALIBRATION["thumb_IP"] == {0: 0, 20: 30, 45: 90}
+    path.write_text('{"thumb_IP": [[0, 0], [30, 90]]}')  # a file with some joints: the others are the library's
+    adapt.load_calibration(path)
+    assert adapt.CALIBRATION == {**adapt._DEFAULT_CALIBRATION, "thumb_IP": {0: 0, 30: 90}}
+    # No file, or not a calibration: refused, and nothing changes.
+    with pytest.raises(OSError):
+        adapt.load_calibration(tmp_path / "none.json")
     for bad in ("nope", "[1, 2]", '{"thumb_IP": [[0, 0]]}', '{"thumb_IP": [[0, 0, 1], [1, 2, 3]]}',
                 '{"wrist": [[0, 0], [1, 1]]}', '{"middle_spread": [[0, 0], [1, 1]]}', '{"thumb_IP": [[0, true], [1, 2]]}'):
         path.write_text(bad)
-        adapt.CALIBRATION["thumb_IP"] = {0: 0, 30: 90}
         with pytest.raises(ValueError, match="not an ADAPT calibration"):
             adapt.load_calibration(path)
         assert adapt.CALIBRATION["thumb_IP"] == {0: 0, 30: 90}
+
+
+def test_a_calibration_becomes_the_librarys_with_its_script(tmp_path):
+    import ast
+    import sys
+    from pathlib import Path
+
+    from metaquest_teleop import adapt
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "set_calibration.py"
+    package = tmp_path / "repo" / "src" / "metaquest_teleop"
+    package.mkdir(parents=True)
+    for name in ("adapt.py", "view.html"):
+        (package / name).write_text((files("metaquest_teleop") / name).read_text(encoding="utf-8"), encoding="utf-8")
+    run = lambda path: subprocess.run([sys.executable, str(script), str(path), "--root", str(tmp_path / "repo")],  # noqa: E731
+                                      capture_output=True, text=True)
+    library = lambda: ast.literal_eval(  # noqa: E731
+        (package / "adapt.py").read_text().split("\nCALIBRATION = ")[1].split("  # fmt: skip")[0])
+
+    adapt.reset_calibration()  # the library's own: nothing changes
+    adapt.save_calibration(tmp_path / "same.json")
+    before = {name: (package / name).read_text() for name in ("adapt.py", "view.html")}
+    assert run(tmp_path / "same.json").returncode == 0
+    assert {name: (package / name).read_text() for name in before} == before
+    ip = dict(adapt.CALIBRATION["thumb_IP"])  # yours, a point more: in the Python and in the 3D view
+    ip[max(ip) + 7.25] = 77.5
+    adapt.CALIBRATION["thumb_IP"] = ip
+    adapt.CALIBRATION["thumb_CMC2"][(-33.5, 44.25)] = -20.5
+    adapt.save_calibration(tmp_path / "mine.json")
+    done = run(tmp_path / "mine.json")
+    assert done.returncode == 0 and "thumb_IP" in done.stdout and "thumb_CMC1" not in done.stdout
+    assert library() == adapt.CALIBRATION
+    if shutil.which("node") is not None:
+        html = (package / "view.html").read_text()
+        page = tmp_path / "calibration.js"
+        page.write_text(html.split("// math-begin")[1].split("// math-end")[0]
+                        + "process.stdout.write(JSON.stringify(ADAPT_CALIBRATION));")
+        shown = json.loads(subprocess.run(["node", str(page)], capture_output=True, text=True, check=True).stdout)
+        assert shown == {joint: adapt._rows(dict(sorted(points.items()))) for joint, points in adapt.CALIBRATION.items()}
+    (tmp_path / "bad.json").write_text('{"thumb_IP": [[0, 0]]}')  # not a calibration: nothing changes
+    before = (package / "adapt.py").read_text()
+    assert run(tmp_path / "bad.json").returncode == 1 and (package / "adapt.py").read_text() == before
 
 
 def test_the_3d_view_calibrates_only_with_metaquest_teleop_calibration(tmp_path):
@@ -512,7 +568,7 @@ def test_the_3d_view_calibrates_only_with_metaquest_teleop_calibration(tmp_path)
         status, answer = asyncio.run(post(port, {"joint": "thumb_IP", "points": [[30, 90], [0, 0]]}))
         assert status == 200 and answer["calibration"]["thumb_IP"] == [[0, 0], [30, 90]]  # in order
         assert adapt.CALIBRATION["thumb_IP"] == {0: 0, 30: 90}
-        assert json.loads(path.read_text()) == {"thumb_IP": [[0, 0], [30, 90]]}
+        assert json.loads(path.read_text())["thumb_IP"] == [[0, 0], [30, 90]]  # all of it, at every point
         for bad in ({"joint": "thumb_IP", "points": [[0, 0]]}, {"joint": "middle_spread", "points": [[0, 0], [1, 1]]},
                     {"joint": "nope"}, {"points": []}, [1]):
             status, answer = asyncio.run(post(port, bad))
@@ -520,12 +576,12 @@ def test_the_3d_view_calibrates_only_with_metaquest_teleop_calibration(tmp_path)
         assert adapt.CALIBRATION["thumb_IP"] == {0: 0, 30: 90}  # unchanged
         status, _ = asyncio.run(post(port, {"joint": "thumb_IP"}, as_json=False))
         assert status == 415  # not JSON: another web page cannot send it
-        status, answer = asyncio.run(post(port, {"joint": "thumb_IP"}))  # back to its default points
-        assert status == 200 and adapt.CALIBRATION["thumb_IP"] == {0: 0, 45: 90}
-        assert json.loads(path.read_text()) == {}
+        status, answer = asyncio.run(post(port, {"joint": "thumb_IP"}))  # back to the library's points
+        assert status == 200 and adapt.CALIBRATION["thumb_IP"] == adapt._DEFAULT_CALIBRATION["thumb_IP"]
+        assert json.loads(path.read_text())["thumb_IP"] == adapt._rows(adapt._DEFAULT_CALIBRATION["thumb_IP"])
 
 
-def test_the_command_line_loads_the_calibration_and_checks_its_options(tmp_path, monkeypatch, capsys):
+def test_the_command_line_loads_a_calibration_only_when_asked(tmp_path, monkeypatch, capsys):
     import sys
 
     from metaquest_teleop import adapt
@@ -535,8 +591,7 @@ def test_the_command_line_loads_the_calibration_and_checks_its_options(tmp_path,
         monkeypatch.setattr(sys, "argv", ["metaquest-teleop", *args])
         return main()
 
-    for args in (["--calibration", "--no-adapt"], ["--calibration", "--no-calibration-file"],
-                 ["--calibration-file", "x.json", "--no-calibration-file"]):
+    for args in (["--calibration", "--no-adapt"], ["--calibration-file", "x.json", "--no-adapt"]):
         with pytest.raises(SystemExit):
             run(*args)
     bad = tmp_path / "bad.json"
@@ -544,13 +599,12 @@ def test_the_command_line_loads_the_calibration_and_checks_its_options(tmp_path,
     assert run("--calibration-file", str(bad), "--no-adb", "--no-ros") == 1
     assert "not an ADAPT calibration" in capsys.readouterr().out
     assert run("--calibration-file", str(tmp_path / "none.json"), "--no-adb", "--no-ros") == 1
-    assert "No ADAPT calibration in" in capsys.readouterr().out
+    assert "No ADAPT calibration" in capsys.readouterr().out
 
-    # Started, it loads yours from where --calibration saves it, unless --no-calibration-file.
+    # Started, it uses the library's calibration, or the one you name.
     adapt.CALIBRATION["thumb_IP"] = {0: 0, 30: 90}
-    saved = adapt.save_calibration()
-    adapt.reset_calibration()
-    for extra, said in (([], f"ADAPT calibration: {saved}"), (["--no-calibration-file"], "ADAPT calibration: the default one")):
+    mine = adapt.save_calibration(adapt.CALIBRATIONS / "adapt-mine.json")
+    for extra, said in (([], "ADAPT calibration: the library's"), (["--calibration-file", str(mine)], f"ADAPT calibration: {mine}")):
         port = _free_port()
         process = subprocess.Popen([sys.executable, "-m", "metaquest_teleop", "--no-adb", "--no-ros", "--plain",
                                     "--port", str(port), *extra], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -777,7 +831,7 @@ def test_adapt_joints_take_your_angles_and_the_motors_reduce_them():
     for i, name in enumerate(adapt.JOINTS):
         want = adapt.calibrated(name, *(yours[n] for n in adapt.FOLLOWS[name]))
         assert joints[i] == pytest.approx(np.radians(want), abs=1e-12), name
-    # ... by default your range stretched onto its own: say the index MCP, your 0..90° its 0..86°.
+    # ... with the typical one your range stretched onto its own: the index MCP, your 0..90° its 0..86°.
     assert np.degrees(joints[5]) == pytest.approx(yours["index base"] / 90 * 86, abs=1e-9)
     assert np.degrees(joints[0]) == pytest.approx((yours["thumb turn"] - 5) / 90 * 86, abs=1e-9)
     assert np.degrees(joints[4]) == pytest.approx(yours["index spread"] / 20 * -17, abs=1e-9)

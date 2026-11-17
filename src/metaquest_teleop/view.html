@@ -194,7 +194,7 @@
   <div class="mono" id="cal-yours"></div>
   <label>ADAPT <input type="range" id="cal-value" step="1"><span id="cal-value-text"></span></label>
   <div class="seg"><button id="cal-add" title="Your angles now give the ADAPT joint this angle">Add point</button>
-    <button id="cal-reset" title="Back to this joint's default points">Default points</button></div>
+    <button id="cal-reset" title="Back to the library's points for this joint">Library's points</button></div>
   <table class="angles mono" id="cal-points"></table>
   <div class="caption" id="cal-error"></div>
   <div class="caption" id="cal-note"></div>
@@ -395,12 +395,12 @@ let adaptFollows = Object.fromEntries(ADAPT_NAMES.map((j) => {  // metaquest-tel
   return [j, [`${digit} ${{ spread: "spread", MCP: "base", PIP: "middle", DIP: "tip" }[joint]}`]];
 }));
 const ADAPT_CALIBRATION = {
-  thumb_CMC1: [[5, 0], [95, 86]], thumb_CMC2: [[20, 35, 0], [70, 20, -60], [0, 30, 20]],
+  thumb_CMC1: [[5, 0], [95, 86]], thumb_CMC2: [[0, 30, 20], [20, 35, 0], [70, 20, -60]],
   thumb_MCP: [[0, 0], [65, 86]], thumb_IP: [[0, 0], [45, 90]],
-  index_spread: [[20, -17], [0, 0]], index_MCP: [[0, 0], [90, 86]], index_PIP: [[0, 0], [90, 69]], index_DIP: [[0, 0], [60, 69]],
+  index_spread: [[0, 0], [20, -17]], index_MCP: [[0, 0], [90, 86]], index_PIP: [[0, 0], [90, 69]], index_DIP: [[0, 0], [60, 69]],
   middle_MCP: [[0, 0], [90, 86]], middle_PIP: [[0, 0], [90, 69]], middle_DIP: [[0, 0], [60, 69]],
-  ring_spread: [[0, 0], [-15, 17]], ring_MCP: [[0, 0], [90, 86]], ring_PIP: [[0, 0], [90, 69]], ring_DIP: [[0, 0], [60, 69]],
-  pinky_spread: [[0, 0], [-25, 17]], pinky_MCP: [[0, 0], [90, 86]], pinky_PIP: [[0, 0], [90, 69]], pinky_DIP: [[0, 0], [60, 69]],
+  ring_spread: [[-15, 17], [0, 0]], ring_MCP: [[0, 0], [90, 86]], ring_PIP: [[0, 0], [90, 69]], ring_DIP: [[0, 0], [60, 69]],
+  pinky_spread: [[-25, 17], [0, 0]], pinky_MCP: [[0, 0], [90, 86]], pinky_PIP: [[0, 0], [90, 69]], pinky_DIP: [[0, 0], [60, 69]],
 };
 let adaptCalibration = ADAPT_CALIBRATION;  // metaquest-teleop sends its own, which you may change
 const adaptClip = (joints) => joints.map((v, i) => Math.min(Math.max(v, ADAPT_LIMITS[i][0]), ADAPT_LIMITS[i][1]));
@@ -1319,7 +1319,7 @@ function toggleFreeze() {
   $("cal-error").textContent = "";
 }
 
-// Give the joint these points (null: its default ones); the server saves them all.
+// Give the joint these points (null: the library's); the server saves them all.
 async function calSend(points) {
   $("cal-error").textContent = "";
   try {
@@ -1372,7 +1372,7 @@ function updateCalibration() {
         `<td><button data-point="${n}" title="Remove this point"${points.length <= fewest ? " disabled" : ""}>×</button></td></tr>`).join("");
   }
   $("cal-note").innerHTML = (adaptFit ? "The fit places the fingers: start with <code>--no-adapt-fit</code> to calibrate them too. " : "") +
-    `Saved to <code>${escapeHtml(status.calibrating)}</code>.`;
+    `Every point is saved to <code>${escapeHtml(status.calibrating)}</code>, the whole calibration.`;
 }
 
 $("cal-freeze").addEventListener("click", toggleFreeze);

@@ -100,8 +100,8 @@ class QuestHands:
     events : collections.deque
         The last six ``(time.time(), text)`` status events.
     calibration : pathlib.Path or None
-        Where the 3D view saves the ADAPT calibration you make in it (``metaquest-teleop
-        --calibration`` sets it); None, the default: the 3D view does not calibrate.
+        The file the 3D view saves the ADAPT calibration you make in it to, all of it at every point
+        (``metaquest-teleop --calibration`` sets it); None, the default: the 3D view does not calibrate.
     """
 
     def __init__(self, port: int = DEFAULT_PORT, adb: bool = True,
@@ -332,7 +332,7 @@ class QuestHands:
 
     async def _calibrate(self, request: web.Request) -> web.Response:
         """From the 3D view, while calibrating: ``{"joint": name, "points": rows}`` gives a joint
-        these points, ``{"joint": name}`` its default ones; then all go to :attr:`calibration`."""
+        these points, ``{"joint": name}`` the library's; then all go to :attr:`calibration`."""
         from . import adapt  # noqa: PLC0415 -- adapt imports this module, through fake
 
         if self.calibration is None:

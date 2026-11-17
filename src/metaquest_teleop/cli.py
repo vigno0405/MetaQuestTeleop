@@ -5,7 +5,8 @@
     metaquest-teleop --print_joints         # print your joint angles and the ADAPT hand's
     metaquest-teleop --no-adapt             # no ADAPT hand: no ADAPT topics, no ADAPT joints
     metaquest-teleop --no-adapt-fit         # the ADAPT hand joint for joint, not fitted to yours
-    metaquest-teleop --calibration          # calibrate the ADAPT hand in the 3D view; it is saved
+    metaquest-teleop --calibration          # calibrate the ADAPT hand in the 3D view, saved to a file
+    metaquest-teleop --calibration-file F   # the ADAPT hand with that calibration, not the library's
     metaquest-teleop --no-ros               # not on ROS 2 (the default publishes when ROS is found)
     metaquest-teleop --udp 127.0.0.1:9000   # also send every frame as JSON to a UDP port
     metaquest-teleop-fake                   # in a second terminal: a fake headset, for testing
@@ -128,36 +129,27 @@ def main() -> int:
     parser.add_argument("--no-adapt-fit", action="store_true",
                         help="the ADAPT fingers joint for joint, through your calibration, instead of fitted to yours")
     parser.add_argument("--calibration", action="store_true",
-                        help="calibrate the ADAPT hand in the 3D view, which opens: your points are saved to the calibration file")
-    files = parser.add_mutually_exclusive_group()
-    files.add_argument("--calibration-file", metavar="FILE", type=Path,
-                       help=f"the ADAPT calibration to load, and to save to with --calibration (default {adapt.CALIBRATION_FILE})")
-    files.add_argument("--no-calibration-file", action="store_true",
-                       help="do not load the saved ADAPT calibration: the default one")
+                        help="calibrate the ADAPT hand in the 3D view, which opens; saved to a new file in "
+                             f"{adapt.CALIBRATIONS}")
+    parser.add_argument("--calibration-file", metavar="FILE", type=Path,
+                        help="the ADAPT hand with this calibration instead of the library's (with --calibration: start from it)")
     parser.add_argument("--hands", choices=("right", "left", "both"), default="right",
                         help="the hands to stream (default right)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args()
-    if args.calibration and args.no_adapt:
-        parser.error("--calibration calibrates the ADAPT hand: leave out --no-adapt")
-    if args.calibration and args.no_calibration_file:
-        parser.error("--calibration saves to the calibration file: leave out --no-calibration-file")
+    if args.no_adapt and (args.calibration or args.calibration_file):
+        parser.error("--calibration and --calibration-file are for the ADAPT hand: leave out --no-adapt")
     if args.no_adapt_fit:
         adapt.FIT = False
-    calibration = None if args.no_calibration_file else args.calibration_file or adapt.CALIBRATION_FILE
-    if not args.no_adapt:
+    if args.calibration_file is not None:
         try:
-            loaded = calibration is not None and adapt.load_calibration(calibration)
-        except ValueError as exc:
-            print(exc)
+            adapt.load_calibration(args.calibration_file)
+        except (OSError, ValueError) as exc:
+            print(f"No ADAPT calibration: {exc}")
             return 1
-        if loaded:
-            print(f"ADAPT calibration: {calibration}", flush=True)
-        elif args.calibration_file is not None and not args.calibration:
-            print(f"No ADAPT calibration in {calibration}: make one with --calibration, or leave out --calibration-file")
-            return 1
-        else:
-            print("ADAPT calibration: the default one" + (f" (yours will go to {calibration})" if args.calibration else ""), flush=True)
+    if not args.no_adapt:
+        print("ADAPT calibration:", args.calibration_file or "the library's", flush=True)
+    session = adapt.CALIBRATIONS / f"adapt-{time.strftime('%Y-%m-%d-%H%M%S')}.json"
 
     try:
         quest = QuestHands(args.port, adb=not args.no_adb, udp=args.udp, hands=args.hands).start()
@@ -181,8 +173,9 @@ def main() -> int:
             through = f" through {ros.python}, the Python ROS 2 runs on" if ros.python else ""
             print(f"publishing on ROS 2{through}: /metaquest/... (ros2 topic list)", flush=True)
     if args.calibration:
-        quest.calibration = calibration
-        print(f"Calibrate the ADAPT hand in the 3D view: {quest.view_url}?mode=adapt", flush=True)
+        quest.calibration = session
+        print(f"Calibrate the ADAPT hand in the 3D view: {quest.view_url}?mode=adapt; "
+              f"your points go to {session}", flush=True)
         webbrowser.open(f"{quest.view_url}?mode=adapt")
     elif args.view:
         webbrowser.open(quest.view_url)

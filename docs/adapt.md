@@ -29,7 +29,6 @@ yours. Both follow your hand also while the robot holds (its **robot** line says
 ```python
 from metaquest_teleop import QuestHands, adapt
 
-adapt.load_calibration()  # yours, if you made one: below
 with QuestHands() as quest:
     while True:
         hand = quest.wait().right
@@ -52,8 +51,8 @@ or while a hand is not seen ([teleoperation](teleop.md)). `--no-adapt` leaves th
 ## Calibrate it to your hand
 
 Each ADAPT joint follows one angle of yours (the thumb's CMC2 two) through **points**: at this
-angle of yours, the ADAPT joint is at that angle. The defaults suit a typical hand
-([below](#joints-your-calibration)); to fit yours, start:
+angle of yours, the ADAPT joint is at that angle. The library comes with its points
+([below](#joints-the-calibration)), the same wherever it is installed. To make new ones:
 
 ```bash
 metaquest-teleop --calibration
@@ -66,23 +65,36 @@ for each point:
 2. **Make the pose** with your hand and press **Space** (or **Freeze**): your hand holds still in
    the view, and you can let go of the pose. The panel shows your angles that the joint follows.
 3. **Drag the ADAPT slider** until the ADAPT hand looks right: the joint moves as you drag.
-4. **Add point**. It is saved at once, and the ADAPT hand follows it from now on.
+4. **Add point**. The ADAPT hand follows it from now on.
 5. Press **Space** again to unfreeze, and go on with the next pose.
 
-The panel lists the joint's points: **×** removes one, **Default points** puts back the joint's
-default ones. A joint needs two points at least (the thumb's CMC2 three).
+The panel lists the joint's points: **×** removes one, **Library's points** puts back the
+library's for that joint. A joint needs two points at least (the thumb's CMC2 three).
 
-Your points go to `~/.config/metaquest-teleop/adapt_calibration.json`, and `metaquest-teleop`
-loads them every time it starts, with or without `--calibration`: the dashboard,
-`--print_joints`, ROS 2 and the teleoperation all use them. Nothing to change in the library.
+Each time, the calibration goes to a new file in `~/.config/metaquest-teleop/calibrations/`,
+named by when you started, say `adapt-2026-11-17-103000.json`: all of it, saved at every point.
+The files stay there as backups; they are small. `metaquest-teleop` itself always uses the
+library's calibration, unless you name a file:
 
 | Command | |
 |---|---|
-| `metaquest-teleop --calibration` | calibrate in the 3D view; your points are saved |
-| `metaquest-teleop --calibration-file FILE` | another calibration, one per person say: loaded, and saved to with `--calibration` |
-| `metaquest-teleop --no-calibration-file` | the default calibration, whatever you saved |
+| `metaquest-teleop --calibration` | calibrate in the 3D view, from the library's points; saved to a new file |
+| `metaquest-teleop --calibration-file FILE` | the ADAPT hand with that calibration instead, to try it |
+| `metaquest-teleop --calibration --calibration-file FILE` | calibrate on from that file; saved to a new file |
 
-Some advice:
+### Make it the library's
+
+When a calibration is right, make it the library's. In the repository:
+
+```bash
+python scripts/set_calibration.py ~/.config/metaquest-teleop/calibrations/adapt-2026-11-17-103000.json
+```
+
+It writes the file's points in `adapt.CALIBRATION` (`src/metaquest_teleop/adapt.py`) and in the
+3D view, and lists the joints that changed. Then run the tests, say so in `CHANGELOG.md`, and
+release: `pip install -U metaquest-teleop` brings it to every computer.
+
+### Some advice
 
 - **Start with the ends of a joint's range**, open and fully bent: two points are a straight line
   through them. Add one in between only where the ADAPT joint goes wrong.
@@ -95,37 +107,37 @@ Some advice:
 
 ```json
 {
-  "thumb_CMC2": [[20, 35, 0], [70, 20, -60], [0, 30, 20], [45, 25, -20]],
+  "thumb_CMC1": [[5, 0], [95, 86]],
+  "thumb_CMC2": [[0, 30, 20], [20, 35, 0], [45, 25, -20], [70, 20, -60]],
+  "thumb_MCP": [[0, 0], [65, 86]],
   "thumb_IP": [[0, 0], [20, 30], [45, 90]]
 }
 ```
 
-Each point is your angle (for CMC2 your base and spread), then the ADAPT joint's, in degrees.
-Only the joints you changed are there; the others keep their default points. You can edit it by
-hand; delete it to go back to the defaults.
+One line per joint (here the thumb's; the fingers' follow); each point is your angle (for CMC2 your base and spread), then the ADAPT
+joint's, in degrees. You can edit it by hand. A file with only some joints gives the others the
+library's points.
 
 ### In Python
 
 ```python
 from metaquest_teleop import adapt
 
-adapt.load_calibration()                          # yours, as metaquest-teleop --calibration saved it
 adapt.CALIBRATION["thumb_IP"][30] = 50            # your IP at 30°: its IP at 50°
 adapt.CALIBRATION["thumb_CMC2"][(45, 25)] = -20   # your base 45° and spread 25°: its CMC2 at -20°
-adapt.save_calibration()                          # for the next time, and for metaquest-teleop
+adapt.save_calibration("mine.json")
+adapt.load_calibration("mine.json")               # or one metaquest-teleop --calibration saved
+adapt.reset_calibration()                         # back to the library's
 
 print(adapt.your_angles(hand))                    # your angles now, by name, in degrees
 print(adapt.calibrated("thumb_CMC2", 10, 40))     # its CMC2 at your base 10°, spread 40°
 ```
 
-The library loads no calibration by itself: until `adapt.load_calibration()`, it uses the
-defaults. `adapt.reset_calibration()` goes back to them.
-
 ## Joints: the pose closest to yours
 
 The ADAPT hand is not your hand: its bones have other lengths, its thumb sits elsewhere on the
-palm, and its joints turn about other axes. Its **thumb** follows your calibration
-([below](#joints-your-calibration)). Its **fingers** take the pose that puts them where yours
+palm, and its joints turn about other axes. Its **thumb** follows the calibration
+([below](#joints-the-calibration)). Its **fingers** take the pose that puts them where yours
 are, around that thumb, through its forward kinematics:
 
 - **your knuckles on its knuckles**: your hand, scaled and shifted so that your four knuckles
@@ -145,43 +157,42 @@ that pose back.
 
 The thumb is not fitted because the two thumbs differ too much to match their shapes: fitting
 it bent the ADAPT's MCP to its limit in most grasps, whatever yours did. The catch is pinches:
-unless your calibration turns CMC2 towards the fingers when you pinch, the ADAPT's thumb tip
+unless the calibration turns CMC2 towards the fingers when you pinch, the ADAPT's thumb tip
 stays short of the fingertip.
 
-## Joints: your calibration
+## Joints: the calibration
 
 `adapt.joint_angles(hand, fit=False)`, `adapt.FIT = False`, or `metaquest-teleop --no-adapt-fit`
 maps the whole ADAPT hand joint for joint; with the fit, the thumb only, and the fit starts from
 this pose. Each ADAPT joint follows angles of yours, those the dashboard and the 3D view show
 (`adapt.FOLLOWS`), through its points (`adapt.CALIBRATION`):
 
-| ADAPT joint | Follows your | Default points, yours → its (°) | Its range (°) |
-|---|---|---|---|
-| thumb CMC1 | thumb **turn**: its first bone, turned about the hand's long axis from sideways towards the palm's front | 5 → 0, 95 → 86 | 0 to 86 |
-| thumb CMC2 | thumb **base** and **spread** | (20, 35) → 0, (70, 20) → −60, (0, 30) → 20 | −70 to 30 |
-| thumb MCP | thumb **middle** | 0 → 0, 65 → 86 | 0 to 86 |
-| thumb IP | thumb **tip** | 0 → 0, 45 → 90 | 0 to 90 |
-| each finger's MCP | its **base** | 0 → 0, 90 → 86 | 0 to 86 |
-| each finger's PIP | its **middle** | 0 → 0, 90 → 69 | 0 to 69 |
-| each finger's DIP | its **tip** | 0 → 0, 60 → 69 | 0 to 69 |
-| index spread | its **spread**, towards the thumb | 20 → −17, 0 → 0 | −17 to 0 |
-| ring spread, pinky spread | their **spread** | 0 → 0, −15 → 17; 0 → 0, −25 → 17 | 0 to 17 |
+| ADAPT joint | Follows your | Its range (°) |
+|---|---|---|
+| thumb CMC1 | thumb **turn**: its first bone, turned about the hand's long axis from sideways towards the palm's front | 0 to 86 |
+| thumb CMC2 | thumb **base** and **spread** | −70 to 30 |
+| thumb MCP | thumb **middle** | 0 to 86 |
+| thumb IP | thumb **tip** | 0 to 90 |
+| each finger's MCP | its **base** | 0 to 86 |
+| each finger's PIP | its **middle** | 0 to 69 |
+| each finger's DIP | its **tip** | 0 to 69 |
+| index spread | its **spread**, towards the thumb | −17 to 0 |
+| ring spread, pinky spread | their **spread** | 0 to 17 |
 
 The middle finger's spread follows nothing: it does not move.
 
 With **one angle of yours**, a joint goes straight from one point to the next, and on in a
 straight line beyond the first and the last: with two points, the line through them. With
 **two** (the thumb's CMC2), it follows the smoothest surface through the points (a thin-plate
-spline): with three, the plane through them, here (100 − 12 · base + 4 · spread) / 11 degrees;
-more bend it just enough to pass through each. A point bends the surface around it, and further
-away too, the more it disagrees with the others. Always within the joint's range.
+spline): with three, the plane through them; more bend it just enough to pass through each. A
+point bends the surface around it, and further away too, the more it disagrees with the others.
+Always within the joint's range.
 
-The default points are typical ranges, set so that, as with the real hand's poses of
+The library's first points were typical ranges, set so that, as with the real hand's poses of
 HumanManipulationVMC (Santello et al., 1998): your **open hand gives home**, all zeros; a
 **power grasp gives PC1** (thumb CMC1 65°, MCP 50°; fingers 55° and 65°); a **pinch gives PC2**
-(thumb 50°, MCP 35°; index 25° and 40°). The thumb's IP turns twice as far as yours: your 0 to
-45° is all of its range. The 3D view of `metaquest-teleop` uses the same calibration, and fits or
-not as the library does.
+(thumb 50°, MCP 35°; index 25° and 40°); and the thumb's IP turns twice as far as yours. The 3D
+view of `metaquest-teleop` uses the same calibration, and fits or not as the library does.
 
 The ADAPT thumb's CMC joints are a gimbal: CMC2 swings its first bone from sideways towards the
 fingers, then CMC1 turns it about the hand's long axis towards the palm's front. Your thumb's

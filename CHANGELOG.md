@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.0 (2026-11-17)
+
+- The ADAPT hand uses the library's calibration, the same on every computer: `metaquest-teleop`
+  no longer loads one from `~/.config` (`--no-calibration-file` and `adapt.CALIBRATION_FILE` are
+  gone). `--calibration-file FILE` uses another, when you ask.
+- `metaquest-teleop --calibration` saves each calibration to a new file, named by when it
+  started, in `~/.config/metaquest-teleop/calibrations/` (`adapt.CALIBRATIONS`): all of it, at
+  every point. The files stay as backups. With `--calibration-file FILE`, it starts from that one.
+- `scripts/set_calibration.py FILE`, in the repository, makes a calibration the library's: it
+  writes its points in `adapt.CALIBRATION` and in the 3D view, ready for a release.
+- `adapt.load_calibration(path)` and `adapt.save_calibration(path)` take the file;
+  `save_calibration` saves every joint.
+
 ## 0.11.0 (2026-11-17)
 
 - Calibrate the ADAPT hand to your hand: `metaquest-teleop --calibration` opens the 3D view with

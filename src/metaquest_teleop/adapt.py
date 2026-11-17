@@ -94,25 +94,26 @@ FOLLOWS = {
 #: plane through them). Then within its limits (:data:`JOINT_LIMITS`). At least two points (for
 #: two angles, three not on one line).
 #:
-#: Change it at any time, in Python or in the 3D view (``metaquest-teleop --calibration``), which
-#: saves it (:func:`save_calibration`) for the next time (:func:`load_calibration`). The defaults:
-#: your open hand gives all zeros (the hand's home), a power grasp about PC1 and a pinch about PC2
-#: of HumanManipulationVMC's PoseControl (Santello et al., 1998).
+#: These are the library's points. Change them at any time, in Python or in the 3D view
+#: (``metaquest-teleop --calibration``, which saves each calibration to a file in
+#: :data:`CALIBRATIONS`: :func:`save_calibration`, :func:`load_calibration`). A calibration becomes
+#: the library's with ``scripts/set_calibration.py`` in its repository. The first ones: your open
+#: hand gives all zeros (the hand's home), a power grasp about PC1 and a pinch about PC2 of
+#: HumanManipulationVMC's PoseControl (Santello et al., 1998).
 CALIBRATION = {
-    "thumb_CMC1": {5: 0, 95: 86}, "thumb_CMC2": {(20, 35): 0, (70, 20): -60, (0, 30): 20},
+    "thumb_CMC1": {5: 0, 95: 86}, "thumb_CMC2": {(0, 30): 20, (20, 35): 0, (70, 20): -60},
     "thumb_MCP": {0: 0, 65: 86}, "thumb_IP": {0: 0, 45: 90},
-    "index_spread": {20: -17, 0: 0}, "index_MCP": {0: 0, 90: 86}, "index_PIP": {0: 0, 90: 69}, "index_DIP": {0: 0, 60: 69},
+    "index_spread": {0: 0, 20: -17}, "index_MCP": {0: 0, 90: 86}, "index_PIP": {0: 0, 90: 69}, "index_DIP": {0: 0, 60: 69},
     "middle_MCP": {0: 0, 90: 86}, "middle_PIP": {0: 0, 90: 69}, "middle_DIP": {0: 0, 60: 69},
-    "ring_spread": {0: 0, -15: 17}, "ring_MCP": {0: 0, 90: 86}, "ring_PIP": {0: 0, 90: 69}, "ring_DIP": {0: 0, 60: 69},
-    "pinky_spread": {0: 0, -25: 17}, "pinky_MCP": {0: 0, 90: 86}, "pinky_PIP": {0: 0, 90: 69}, "pinky_DIP": {0: 0, 60: 69},
+    "ring_spread": {-15: 17, 0: 0}, "ring_MCP": {0: 0, 90: 86}, "ring_PIP": {0: 0, 90: 69}, "ring_DIP": {0: 0, 60: 69},
+    "pinky_spread": {-25: 17, 0: 0}, "pinky_MCP": {0: 0, 90: 86}, "pinky_PIP": {0: 0, 90: 69}, "pinky_DIP": {0: 0, 60: 69},
 }  # fmt: skip
 _DEFAULT_CALIBRATION = {joint: dict(points) for joint, points in CALIBRATION.items()}
 
-#: Where ``metaquest-teleop`` keeps your calibration, and :func:`load_calibration` and
-#: :func:`save_calibration` by default: ``~/.config/metaquest-teleop/adapt_calibration.json``
-#: (``$XDG_CONFIG_HOME`` instead of ``~/.config`` when set).
-CALIBRATION_FILE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "metaquest-teleop" / "adapt_calibration.json"
-
+#: Where ``metaquest-teleop --calibration`` saves each calibration, a new file each time, named by
+#: when it started: ``~/.config/metaquest-teleop/calibrations`` (``$XDG_CONFIG_HOME`` instead of
+#: ``~/.config`` when set).
+CALIBRATIONS = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "metaquest-teleop" / "calibrations"
 
 def _spline(r: np.ndarray) -> np.ndarray:
     """The thin-plate spline's kernel, r^2 log r (0 at r = 0)."""
@@ -206,16 +207,14 @@ def _rows(points: dict) -> list:
     return [[*(_number(x) for x in np.atleast_1d(key)), _number(value)] for key, value in points.items()]
 
 
-def load_calibration(path: str | os.PathLike | None = None) -> bool:
-    """Load a calibration saved by :func:`save_calibration`, from :data:`CALIBRATION_FILE` (where
-    ``metaquest-teleop --calibration`` saves yours) unless ``path``: its joints take its points,
-    the others the defaults. False, and nothing changes, if there is no such file; ValueError if it
-    is not a calibration."""
-    path = Path(CALIBRATION_FILE if path is None else path)
-    if not path.is_file():
-        return False
+def load_calibration(path: str | os.PathLike) -> None:
+    """Load a calibration saved by :func:`save_calibration` (or ``metaquest-teleop
+    --calibration``): its joints take its points, the others the library's. OSError if there is no
+    such file, ValueError if it is not a calibration; nothing changes then."""
+    path = Path(path)
+    text = path.read_text(encoding="utf-8")
     try:
-        saved = json.loads(path.read_text(encoding="utf-8"))
+        saved = json.loads(text)
         if not isinstance(saved, dict):
             raise ValueError("expected {joint: points, ...}")
         loaded = {joint: _points(joint, rows) for joint, rows in saved.items()}
@@ -223,25 +222,23 @@ def load_calibration(path: str | os.PathLike | None = None) -> bool:
         raise ValueError(f"{path} is not an ADAPT calibration: {exc}") from None
     reset_calibration()
     CALIBRATION.update(loaded)
-    return True
 
 
-def save_calibration(path: str | os.PathLike | None = None) -> Path:
-    """Save the joints whose points are not the defaults, to :data:`CALIBRATION_FILE` unless
-    ``path``, for :func:`load_calibration`. As JSON: ``{"thumb_IP": [[0, 0], [45, 90]], ...}``, each
-    point your angle(s) then its angle, in degrees. Returns where it saved."""
-    path = Path(CALIBRATION_FILE if path is None else path)
-    lines = [f"  {json.dumps(joint)}: {json.dumps(_rows(points))}" for joint, points in CALIBRATION.items()
-             if points != _DEFAULT_CALIBRATION.get(joint)]
+def save_calibration(path: str | os.PathLike) -> Path:
+    """Save the calibration as it is now, every joint's points, for :func:`load_calibration` and
+    ``scripts/set_calibration.py``. As JSON: ``{"thumb_IP": [[0, 0], [45, 90]], ...}``, each point
+    your angle(s) then its angle, in degrees. Returns where it saved."""
+    path = Path(path)
+    lines = [f"  {json.dumps(joint)}: {json.dumps(_rows(CALIBRATION[joint]))}" for joint in JOINTS if joint in CALIBRATION]
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_name(path.name + ".partial")
-    partial.write_text("{\n" + ",\n".join(lines) + "\n}\n" if lines else "{}\n", encoding="utf-8")
+    partial.write_text("{\n" + ",\n".join(lines) + "\n}\n", encoding="utf-8")
     os.replace(partial, path)
     return path
 
 
 def reset_calibration(joint: str | None = None) -> None:
-    """Back to the default calibration: of every joint, or of ``joint``."""
+    """Back to the library's calibration: of every joint, or of ``joint``."""
     for name in _DEFAULT_CALIBRATION if joint is None else (joint,):
         CALIBRATION[name] = dict(_DEFAULT_CALIBRATION[name])
     if joint is None:
