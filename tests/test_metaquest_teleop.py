@@ -937,6 +937,33 @@ process.stdout.write(JSON.stringify({{
             assert np.allclose(shape[digit], points, atol=1e-9)
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+def test_while_calibrating_only_the_thumb_joint_you_drag_moves(tmp_path):
+    from dataclasses import replace
+
+    from metaquest_teleop import adapt
+
+    # A pinch: your thumb tip 1 cm from your index tip, so the fit brings the ADAPT's index to its thumb.
+    hand = synthetic_hand("right", np.array([[0.9, 0.2, 0.44, 0.52], [0.45, 0.0, 0.87, 0.61], [0.45, 0.0, 1.0, 0.7]]
+                                            + [[1.0, 0.0, 1.48, 0.96]] * 2), _pose(np.random.default_rng(21)))
+    p = hand.positions.copy()
+    p[4] = p[9] + (p[4] - p[9]) / np.linalg.norm(p[4] - p[9]) * 0.01
+    hand = replace(hand, positions=p)
+    html = VIEW.read_text(encoding="utf-8")
+    script = tmp_path / "drag.js"
+    script.write_text(html.split("// math-begin")[1].split("// math-end")[0] + f"""
+const [a, j] = {json.dumps([hand.angles.tolist(), np.hstack([hand.positions, hand.quaternions]).tolist()])};
+const out = [adaptJoints(a, j)];
+for (let k = 0; k < 4; k++) out.push(adaptJoints(a, j, true, true, adaptFit, [k, 0.2]));
+process.stdout.write(JSON.stringify(out));
+""", encoding="utf-8")
+    plain, *dragged = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True, check=True).stdout)
+    assert np.allclose(plain, adapt.joint_angles(hand), atol=1e-9)
+    for k, joints in enumerate(dragged):
+        moved = np.flatnonzero(np.abs(np.subtract(joints, plain)) > 1e-12)
+        assert joints[k] == pytest.approx(0.2) and set(moved) <= {k}, (adapt.JOINTS[k], moved)
+
+
 def test_hands_must_be_right_left_or_both():
     with pytest.raises(ValueError):
         QuestHands(hands="two")

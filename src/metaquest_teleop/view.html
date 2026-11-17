@@ -194,7 +194,7 @@
   <div class="mono" id="cal-yours"></div>
   <label>ADAPT <input type="range" id="cal-value" step="1"><span id="cal-value-text"></span></label>
   <div class="seg"><button id="cal-add" title="Your angles now give the ADAPT joint this angle">Add point</button>
-    <button id="cal-reset" title="Back to the library's points for this joint">Library's points</button></div>
+    <button id="cal-reset" title="Remove your points for this joint: back to the points the library comes with">Reset joint</button></div>
   <table class="angles mono" id="cal-points"></table>
   <div class="caption" id="cal-error"></div>
   <div class="caption" id="cal-note"></div>
@@ -446,12 +446,18 @@ const rotAxis = (axis, angle) => {
 // to yours. Else joint for joint: each joint follows yours, your range stretched onto its range,
 // then the pose the ADAPT hand can take (each DIP mimics its PIP, one motor spreads the fingers).
 // `coupled` false: the joint-for-joint angles, before the motors. `override`, [joint, radians]:
-// that joint at that angle instead, as a new calibration point would put it.
+// that joint at that angle instead, as a new calibration point would put it. A thumb joint moves
+// alone, the fingers where they were: while you try a point, only the joint you calibrate moves.
 function adaptJoints(angles, joints, clip = true, coupled = true, fit = adaptFit, override = null) {
   const wanted = adaptWanted(angles, joints);
-  if (override) wanted[override[0]] = override[1];
+  const thumb = override && override[0] < 4;
+  if (override && (!thumb || !coupled)) wanted[override[0]] = override[1];
   if (!coupled) return clip ? adaptClip(wanted) : wanted;
-  const motors = fit ? adaptFitMotors(wanted, joints, clip, override) : adaptMotors(wanted, clip);
+  const motors = fit ? adaptFitMotors(wanted, joints, clip, thumb ? null : override) : adaptMotors(wanted, clip);
+  if (thumb) {  // each thumb joint has its own motor
+    const k = override[0], m = override[1] / ADAPT_COUPLING[k][k];
+    motors[k] = clip ? Math.min(Math.max(m, ADAPT_MOTOR_RANGES[0][k]), ADAPT_MOTOR_RANGES[1][k]) : m;
+  }
   const out = ADAPT_COUPLING.map((row) => row.reduce((s, c, m) => s + c * motors[m], 0));
   return clip ? adaptClip(out) : out;  // only rounding to take off
 }

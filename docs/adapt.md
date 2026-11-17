@@ -68,8 +68,12 @@ for each point:
 4. **Add point**. The ADAPT hand follows it from now on.
 5. Press **Space** again to unfreeze, and go on with the next pose.
 
-The panel lists the joint's points: **×** removes one, **Library's points** puts back the
-library's for that joint. A joint needs two points at least (the thumb's CMC2 three).
+The panel lists the joint's points: **×** removes one, **Reset joint** removes yours and puts back
+the points the library comes with. A joint needs two points at least (the thumb's CMC2 three).
+
+While you drag a slider, only that joint moves. Once you add the point, the fit places the
+fingers around the new thumb, as it will on the robot: in a pinch, it brings the ADAPT's fingertip
+towards its thumb tip.
 
 Each time, the calibration goes to a new file in `~/.config/metaquest-teleop/calibrations/`,
 named by when you started, say `adapt-2026-11-17-103000.json`: all of it, saved at every point.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.1 (2026-11-17)
+
+- Calibrating: while you drag a thumb joint, only that joint moves; the fit no longer moves the
+  fingers after it (in a pinch it brought the ADAPT's index towards the thumb tip). Once you add
+  the point, the fit places the fingers around the new thumb, as on the robot.
+- The panel's "Library's points" button is now "Reset joint": it removes your points for the
+  joint, back to the points the library comes with.
+
 ## 0.12.0 (2026-11-17)
 
 - The ADAPT hand uses the library's calibration, the same on every computer: `metaquest-teleop`
